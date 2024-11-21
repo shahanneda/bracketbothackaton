@@ -9,7 +9,7 @@ echo "Installing microphone dependencies..."
 sudo apt-get update
 
 # Install portaudio development package
-sudo apt-get install -y portaudio19-dev python3-dev
+sudo apt-get install -y portaudio19-dev
 
 # Install pyaudio using pip
 pip3 install --upgrade pip
