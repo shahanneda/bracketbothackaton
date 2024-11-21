@@ -57,7 +57,7 @@ class FilteredLSM6DS3():
         self.update()
         # pitch = angle of robot, it's actually about x axis so technically roll
         gx, gy, gz = self.grav
-        return np.degrees(np.atan2(gy, np.sqrt(gx**2 + gz**2)))
+        return np.degrees(np.arctan2(gy, np.sqrt(gx**2 + gz**2)))
     
     def robot_angle_RAW(self):
         gx, gy, gz = self.grav_RAW
