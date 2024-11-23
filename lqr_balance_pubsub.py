@@ -58,6 +58,10 @@ def balance():
     mqtt_control = MqttSubscriber()
     mqtt_control.start()
 
+    # Initialize MQTT client for watchdog
+    watchdog_client = mqtt.Client()
+    watchdog_client.connect("localhost")
+
     # Initialize IMU and LQR gains (same as original)
     imu = FilteredLSM6DS3()
     K_balance = LQR_gains(Q_diag=[100,10,100,1,10,1], R_diag=[0.2, 1])
@@ -78,8 +82,8 @@ def balance():
     yaw_rates, desired_yaw_rates = [], []
 
     # Reset ODrive and initialize motors
-    reset_odrive()
-    time.sleep(1)
+    # reset_odrive()
+    # time.sleep(1)
 
     # Initialize motors (same as original)
     try:
@@ -134,6 +138,9 @@ def balance():
 
         while True:
             loop_start_time = time.time()
+
+            # Feed the watchdog
+            watchdog_client.publish("balance_watchdog", str(time.time()))
 
             if cycle_count % 20 == 0:
                 try:
