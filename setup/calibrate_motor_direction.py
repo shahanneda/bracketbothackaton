@@ -1,8 +1,8 @@
 import json
 import time
 import numpy as np
-from odrive_uart import ODriveUART
-from imu import FilteredLSM6DS3
+from lib.odrive_uart import ODriveUART
+from lib.imu import FilteredLSM6DS3
 
 def test_motor_direction():
     # Initialize IMU and motors

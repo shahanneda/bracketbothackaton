@@ -2,9 +2,9 @@ import time
 import traceback
 import numpy as np
 import matplotlib.pyplot as plt
-from imu import FilteredLSM6DS3
-from odrive_uart import ODriveUART, reset_odrive
-from lqr import LQR_gains
+from lib.imu import FilteredLSM6DS3
+from lib.odrive_uart import ODriveUART, reset_odrive
+from lib.lqr import LQR_gains
 import os
 import json
 
