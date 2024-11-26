@@ -1,36 +1,39 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from madgwick_py.madgwickahrs import MadgwickAHRS, Quaternion
+from .madgwickahrs import MadgwickAHRS, Quaternion
 
 import time
 import board
-from adafruit_lsm6ds.lsm6ds3 import LSM6DS3
-import adafruit_lsm6ds
+import adafruit_mpu6050
 
-
-
-class FilteredLSM6DS3():
+class FilteredMPU6050():
     
     def __init__(self):
-        self.sensor = LSM6DS3(board.I2C())
-        self.sensor.gyro_range = adafruit_lsm6ds.GyroRange.RANGE_1000_DPS  # Set gyroscope range to ±2000 dps
+        self.sensor = adafruit_mpu6050.MPU6050(board.I2C())
+        self.sensor.gyro_range = adafruit_mpu6050.GyroRange.RANGE_1000_DPS  # Set gyroscope range to ±1000 dps
         self.ahrs = MadgwickAHRS(beta=0.008, zeta=0.)
-        self.alpha = 1.0 #  LPF alpha: x[t] := a*x[t] + (1-a)*x[t-1]
-        self.gyro_bias = np.array([0.,0.,0.])
+        self.alpha = 1.0  # LPF alpha: x[t] := a*x[t] + (1-a)*x[t-1]
+        self.gyro_bias = np.array([0., 0., 0.])
 
     def calibrate(self):
         try:
-           self.gyro_bias = np.loadtxt('gyro_bias.txt') 
+            self.gyro_bias = np.loadtxt('gyro_bias.txt') 
         except FileNotFoundError:
-            self.gyro_bias = np.array([0.,0.,0.])
+            self.gyro_bias = np.array([0., 0., 0.])
             for _ in range(50):
-                self.gyro_bias += np.array(self.sensor.gyro) / 50
+                gyro_sample = np.array(self.sensor.gyro)
+                gyro_sample = gyro_sample[[1, 0, 2]]  # Swap X and Y axes
+                self.gyro_bias += gyro_sample / 50
                 time.sleep(0.01)
             print('Calculated gyro bias:', self.gyro_bias)
             np.savetxt('gyro_bias.txt', self.gyro_bias)
 
-        self.accel = np.array(self.sensor.acceleration)
-        self.gyro = np.array(self.sensor.gyro) - self.gyro_bias
+        accel = np.array(self.sensor.acceleration)
+        accel = accel[[1, 0, 2]]  # Swap X and Y axes
+        gyro = np.array(self.sensor.gyro) - self.gyro_bias
+        gyro = gyro[[1, 0, 2]]  # Swap X and Y axes
+        self.accel = accel
+        self.gyro = gyro
         self.t = time.time()
 
         self.quat = self._calculate_initial_q(self.accel)
@@ -63,7 +66,6 @@ class FilteredLSM6DS3():
         gx, gy, gz = self.grav_RAW
         return np.degrees(np.arctan2(gy, np.sqrt(gx**2 + gz**2)))
 
-
     def _calculate_initial_q(self, accel):
         acc_norm = accel / np.linalg.norm(accel)
 
@@ -71,7 +73,6 @@ class FilteredLSM6DS3():
         initial_roll = np.arctan2(acc_norm[1], acc_norm[2])
         initial_pitch = np.arctan2(-acc_norm[0], np.sqrt(acc_norm[1]**2 + acc_norm[2]**2))
         initial_yaw = 0
-        # print('Initial roll, pitch, yaw:', np.degrees(initial_roll), np.degrees(initial_pitch), np.degrees(initial_yaw))
 
         # Initialize quaternion using the from_angle_axis function
         initial_q = Quaternion.from_angle_axis(initial_roll, 1, 0, 0)
@@ -81,8 +82,12 @@ class FilteredLSM6DS3():
 
     def update(self):
         # sensor readings
-        self.accel = np.array(self.sensor.acceleration)
-        self.gyro = np.array(self.sensor.gyro) - self.gyro_bias
+        accel = np.array(self.sensor.acceleration)
+        accel = accel[[1, 0, 2]]  # Swap X and Y axes
+        gyro = np.array(self.sensor.gyro) - self.gyro_bias
+        gyro = gyro[[1, 0, 2]]  # Swap X and Y axes
+        self.accel = accel
+        self.gyro = gyro
         t = time.time()
 
         # store imu data
@@ -106,9 +111,8 @@ class FilteredLSM6DS3():
         qv = np.concatenate(([0], v))
         return (q * Quaternion(qv) * q.conj()).q[1:]
 
-
 if __name__ == '__main__':
-    imu = FilteredLSM6DS3()
+    imu = FilteredMPU6050()
     imu.calibrate()
     start_time = time.time()
     times = []
@@ -127,8 +131,8 @@ if __name__ == '__main__':
         gyros.append(imu.gyro)
         gravs.append(imu.grav)
 
-    times = np.array(times)-times[0]
-    print('Average Hz:', 1/(np.mean(times[1:]-times[:-1])))
+    times = np.array(times) - times[0]
+    print('Average Hz:', 1 / (np.mean(times[1:] - times[:-1])))
 
     plt.figure()
     gyros = np.stack(gyros)
@@ -144,10 +148,9 @@ if __name__ == '__main__':
     plt.plot(times, accels)
     plt.savefig('accel.png')
 
-
     def grav2pitch(gravs):
-        return np.degrees(np.atan2(gravs[...,2], np.sqrt(gravs[...,0]**2 + gravs[...,1]**2)))
-    
+        return np.degrees(np.atan2(gravs[..., 2], np.sqrt(gravs[..., 0]**2 + gravs[..., 1]**2)))
+
     plt.figure()
     plt.plot(times, grav2pitch(accels), label='noisy', alpha=0.4)
     plt.plot(times, pitches, label='filtered')

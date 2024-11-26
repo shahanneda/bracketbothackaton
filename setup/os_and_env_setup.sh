@@ -38,9 +38,9 @@ echo 'source ~/.venv/bin/activate' >> ~/.bashrc
 echo "Installing RPi.GPIO and lgpio libraries..."
 pip install RPi.GPIO rpi-lgpio
 
-# Install Adafruit LSM6DS library
-echo "Installing Adafruit LSM6DS library..."
-pip install adafruit-circuitpython-lsm6ds
+# Install Adafruit MPU6050 library
+echo "Installing Adafruit MPU6050 library..."
+pip install adafruit-circuitpython-mpu6050
 
 # Install ODrive package
 echo "Installing ODrive package..."
@@ -84,6 +84,6 @@ read -p "Press Enter once the ODrive is connected..."
 
 # Run the calibration script
 echo "Running the ODrive calibration script..."
-python3 ~/quickstart/calibrate_odrive.py
+python3 ~/quickstart/setup/calibrate_odrive.py
 
 echo "Setup complete! You may need to reboot your system for all changes to take effect."

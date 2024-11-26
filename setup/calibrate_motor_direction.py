@@ -1,20 +1,33 @@
+# Adds the lib directory to the Python path
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+
 import json
 import time
 import numpy as np
-from lib.odrive_uart import ODriveUART
-from lib.imu import FilteredLSM6DS3
+
+
+from lib.odrive_uart import ODriveUART, reset_odrive
+from lib.imu import FilteredMPU6050
 
 def test_motor_direction():
     # Initialize IMU and motors
-    imu = FilteredLSM6DS3()
+    imu = FilteredMPU6050()
     imu.calibrate()
     
-    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=1, dir_right=1)
+    # Reset ODrive before initializing motors
+    reset_odrive()
+    time.sleep(3)  # Wait for ODrive to reset
+    
+    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=1, dir_right=1)
     
     directions = {'left': 1, 'right': 1}
     
     # Test each motor
     for name in ['left', 'right']:
+        time.sleep(1)
         print(f"\nTesting {name} motor...")
         
         # Start motor in closed loop control
@@ -24,6 +37,16 @@ def test_motor_direction():
         else:
             motor_controller.start_right()
             motor_controller.enable_velocity_mode_right()
+            
+        # Clear any errors
+        if name == 'left':
+            if motor_controller.check_errors_left():
+                print("Clearing left motor errors...")
+                motor_controller.clear_errors_left()
+        else:
+            if motor_controller.check_errors_right():
+                print("Clearing right motor errors...")
+                motor_controller.clear_errors_right()
         
         # Get baseline gyro reading
         imu.update()
@@ -66,12 +89,12 @@ def test_motor_direction():
         time.sleep(0.5)  # Wait between tests
     
     # Save results to file
-    with open('motor_dir.json', 'w') as f:
+    with open(os.path.expanduser('~/quickstart/lib/motor_dir.json'), 'w') as f:
         json.dump(directions, f)
     
     print("\nDirection test complete!")
     print(f"Left direction: {directions['left']}, Right direction: {directions['right']}")
-    print(f"Results saved to motor_dir.json: {directions}")
+    print(f"Results saved to ~/quickstart/lib/motor_dir.json: {directions}")
 
 if __name__ == '__main__':
     try:

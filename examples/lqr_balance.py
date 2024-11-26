@@ -1,8 +1,13 @@
+# Adds the lib directory to the Python path
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 import time
 import traceback
 import numpy as np
 import matplotlib.pyplot as plt
-from lib.imu import FilteredLSM6DS3
+from lib.imu import FilteredMPU6050
 from lib.odrive_uart import ODriveUART, reset_odrive
 from lib.lqr import LQR_gains
 import os
@@ -17,7 +22,7 @@ MAX_TORQUE = 2.5  # Nm, adjust based on your motor's specifications
 MAX_SPEED = 0.4  # m/s, set maximum linear speed
 
 def balance():
-    imu = FilteredLSM6DS3()
+    imu = FilteredMPU6050()
     
     K = LQR_gains(
         #     [x, v, θ, ω, δ, δ']
@@ -56,14 +61,14 @@ def balance():
     # Initialize motors
     # Read motor directions from saved file
     try:
-        with open('motor_dir.json', 'r') as f:
+        with open(os.path.expanduser('~/quickstart/lib/motor_dir.json'), 'r') as f:
             motor_dirs = json.load(f)
             left_dir = motor_dirs['left']
             right_dir = motor_dirs['right']
     except Exception as e:
         raise Exception("Error reading motor_dir.json")
     
-    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=left_dir, dir_right=right_dir)
+    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
     motor_controller.start_left()
     motor_controller.enable_torque_mode_left()
     motor_controller.start_right()
@@ -77,7 +82,7 @@ def balance():
         reset_odrive()
         time.sleep(1)  # Give ODrive time to reset
         try:
-            motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=left_dir, dir_right=right_dir)
+            motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
             motor_controller.clear_errors_left()
             motor_controller.clear_errors_right()
             motor_controller.enable_torque_mode_left()

@@ -1,4 +1,4 @@
-import lib.odrive as odrive
+import odrive
 from odrive.enums import *
 import time
 
