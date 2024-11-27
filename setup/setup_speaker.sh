@@ -5,11 +5,14 @@ set -e
 
 echo "Installing speaker dependencies..."
 
+# Install system dependencies for audio
+sudo apt-get update
+sudo apt-get install -y python3-pyaudio libportaudio2 libportaudiocpp0 portaudio19-dev libsndfile1
+
 # Update pip
 pip3 install --upgrade pip
-
-# Install required Python packages
-pip3 install elevenlabs sounddevice soundfile python-dotenv
+# Install Python audio and sound packages
+pip3 install pyaudio pyalsaaudio elevenlabs sounddevice soundfile python-dotenv
 
 echo "Speaker setup complete!"
 
