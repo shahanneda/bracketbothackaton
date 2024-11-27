@@ -17,12 +17,14 @@ class FilteredMPU6050():
         self.sensor = adafruit_mpu6050.MPU6050(board.I2C())
         # self.sensor.gyro_range = adafruit_mpu6050.GyroRange.RANGE_500_DPS  # Set gyroscope range to ±1000 dps
         self.ahrs = MadgwickAHRS(beta=0.008, zeta=0.)
-        self.alpha = 1.0  # LPF alpha: x[t] := a*x[t] + (1-a)*x[t-1]
+        self.alpha = 1  # LPF alpha: x[t] := a*x[t] + (1-a)*x[t-1]
         self.gyro_bias = np.array([0., 0., 0.])
 
     def calibrate(self):
         try:
-            self.gyro_bias = np.loadtxt('gyro_bias.txt')
+            raw_bias = np.loadtxt('gyro_bias.txt')
+            # Remap the bias the same way we remap the gyro readings
+            self.gyro_bias = np.array([-raw_bias[1], raw_bias[0], raw_bias[2]])
         except FileNotFoundError:
             self.gyro_bias = np.array([0., 0., 0.])
             for _ in range(50):
@@ -30,7 +32,8 @@ class FilteredMPU6050():
                 self.gyro_bias += gyro / 50
                 time.sleep(0.01)
             print('Calculated gyro bias:', self.gyro_bias)
-            np.savetxt('gyro_bias.txt', self.gyro_bias)
+            # Save the unmapped bias values
+            np.savetxt('gyro_bias.txt', np.array([self.gyro_bias[1], -self.gyro_bias[0], self.gyro_bias[2]]))
 
         self.accel, gyro_raw = self.read_sensor()
         self.gyro = gyro_raw - self.gyro_bias
@@ -165,7 +168,7 @@ if __name__ == '__main__':
     plt.savefig('accel.png')
 
     def grav2pitch(gravs):
-        return np.degrees(np.atan2(gravs[..., 2], np.sqrt(gravs[..., 0]**2 + gravs[..., 1]**2)))
+        return np.degrees(np.arctan2(gravs[..., 2], np.sqrt(gravs[..., 0]**2 + gravs[..., 1]**2)))
 
     plt.figure()
     plt.plot(times, grav2pitch(accels), label='noisy', alpha=0.4)

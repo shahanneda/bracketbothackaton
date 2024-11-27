@@ -41,10 +41,10 @@ def create_dev_environment():
         main_window.select_layout('tiled')
 
         # Send commands to each pane in 2x2 grid
-        main_pane.send_keys('cd ~/quickstart && python3 lqr_balance_pubsub.py')
-        right_pane.send_keys('cd ~/quickstart && python3 autodeploy_legs_watchdog.py')
-        bottom_left_pane.send_keys('cd ~/quickstart && python3 face_recognition.py')
-        bottom_right_pane.send_keys('cd ~/quickstart && python3 -m http.server 8080')
+        main_pane.send_keys('cd ~/quickstart/examples && python3 lqr_balance_pubsub.py')
+        right_pane.send_keys('cd ~/quickstart/examples && python3 node_autodeploy_legs.py')
+        bottom_left_pane.send_keys('cd ~/quickstart/examples && python3 face_recognition.py')
+        bottom_right_pane.send_keys('cd ~/quickstart/examples && python3 -m http.server 8080')
 
         print(f"Tmux session '{SESSION_NAME}' created successfully!")
         
