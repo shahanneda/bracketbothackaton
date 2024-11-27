@@ -35,7 +35,7 @@ def balance():
 
     prev_time = time.time()
     
-    zero_angle = -0.0
+    zero_angle = 3.0
     desired_yaw_rate = 0
     desired_vel = 0
 
