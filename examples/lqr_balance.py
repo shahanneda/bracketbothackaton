@@ -35,7 +35,7 @@ def balance():
 
     prev_time = time.time()
     
-    zero_angle = -2.0
+    zero_angle = -0.0
     desired_yaw_rate = 0
     desired_vel = 0
 
@@ -140,9 +140,7 @@ def balance():
             cycle_count += 1
 
             pitch, roll, yaw = imu.get_orientation()
-            # current_pitch = imu.robot_angle() 
-            current_pitch = roll
-            # print(f"current_pitch: {current_pitch:.2f}")
+            current_pitch = -pitch
             current_yaw_rate = -imu.gyro_RAW[2]
             current_pitch_rate = imu.gyro_RAW[0]
             try:
@@ -157,7 +155,7 @@ def balance():
                              
             except Exception as e:
                 print('Motor controller error:', e)
-                reset_and_initialize_motors()
+                # reset_and_initialize_motors()
                 continue
 
             current_time = time.time()
