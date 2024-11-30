@@ -16,7 +16,7 @@ client = ElevenLabs(
 )
 
 audio = client.generate(
-    text="i appreciate the invitation but I cant come",
+    text="This is a test of the speaker",
     voice="Brian",
     # voice="tdr2UZjCfSq8qpr5CfgU",
     # voice="ceicSWVDzgXoWidth8WQ", #raphael
