@@ -42,6 +42,31 @@ pip install RPi.GPIO rpi-lgpio
 echo "Installing Adafruit MPU6050 library..."
 pip install adafruit-circuitpython-mpu6050
 
+# Install mosquitto broker and clients
+echo "Installing mosquitto broker and clients..."
+sudo apt install -y mosquitto mosquitto-clients ufw
+sudo systemctl enable mosquitto
+sudo systemctl start mosquitto
+
+# Configure mosquitto ports
+echo "Configuring mosquitto ports..."
+sudo bash -c 'cat > /etc/mosquitto/conf.d/default.conf << EOL
+listener 1883 127.0.0.1
+protocol mqtt
+
+listener 9001
+protocol websockets
+allow_anonymous true
+EOL'
+
+# Restart mosquitto to apply changes
+sudo ufw allow 9001
+sudo systemctl restart mosquitto
+
+# Install paho-mqtt Python package
+echo "Installing paho-mqtt..."
+pip install paho-mqtt
+
 # Install ODrive package
 echo "Installing ODrive package..."
 pip install odrive==0.5.1.post0
@@ -62,7 +87,7 @@ sudo usermod -a -G dialout,audio $USER
 
 # Configure boot settings
 echo "Configuring boot settings..."
-sudo sh -c 'printf "\nenable_uart=1\ndtoverlay=uart1-pi5\n" >> /boot/firmware/config.txt'
+sudo sh -c 'printf "\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\n" >> /boot/firmware/config.txt'
 
 # Install git
 # echo "Installing git..."
