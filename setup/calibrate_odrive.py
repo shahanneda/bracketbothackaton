@@ -1,6 +1,15 @@
+import time
+import fibre
+import fibre.serial_transport
 import odrive
 from odrive.enums import *
-import time
+
+
+ENCODER_ERRORS = {name: value for name, value in vars(odrive.enums).items() if name.startswith('ENCODER_ERROR')}
+CONTROLLER_ERRORS = {name: value for name, value in vars(odrive.enums).items() if name.startswith('CONTROLLER_ERROR')}
+MOTOR_ERRORS = {name: value for name, value in vars(odrive.enums).items() if name.startswith('MOTOR_ERROR')}
+AXIS_ERRORS = {name: value for name, value in vars(odrive.enums).items() if name.startswith('AXIS_ERROR')}
+
 
 # Helper function to wait until the axis reaches idle state
 def wait_for_idle(axis):
@@ -8,28 +17,71 @@ def wait_for_idle(axis):
         time.sleep(0.1)
 
 # Helper function to reconnect to the ODrive after reboot
-def reconnect_odrive():
-    print("Waiting for ODrive to reboot...")
-    time.sleep(5)
-    print("Reconnecting to ODrive...")
-    return odrive.find_any()
+def connect_odrive():
+    print("Connecting to ODrive...")
+    return odrive.find_any(path='serial:/dev/ttyAMA1')
+
+def save_and_reboot(odrv):
+    print("Saving configuration...")
+    try:
+        odrv.save_configuration()
+        print("Configuration saved successfully.")
+        
+        print("Rebooting ODrive...")
+        try:
+            odrv.reboot()
+        except:
+            # Exception is expected as connection is lost during reboot
+            # Close the hanging connection
+            odrv.__channel__.serial_device.close()
+            
+    except Exception as e:
+        print(f"Error saving configuration: {str(e)}")
+        return None
+    
+    time.sleep(1)
+    return connect_odrive()
+
+
+def print_errors(error_type, error_value):
+    """Print errors for a given component type and error value."""
+    if error_value == 0:
+        return
+    error_dict = {name: value for name, value in vars(odrive.enums).items() 
+                 if name.startswith(f'{error_type.upper()}_ERROR')}
+    
+    error_string = ""
+    for error_name, error_code in error_dict.items():
+        if error_value & error_code:
+            error_string += f"{error_name.replace(f'{error_type.upper()}_ERROR_', '').lower().replace('_', ' ')}, "
+    error_string = error_string.rstrip(", ")
+    print(f"\033[91m{error_type.capitalize()} error {hex(error_value)}: {error_string}\033[0m")
 
 # Function to calibrate a single axis
 def calibrate_axis(odrv0, axis):
     print(f"Calibrating axis{axis}...")
     
     # Clear errors
-    print("Clearing errors...")
+    print("Checking errors...")
     getattr(odrv0, f'axis{axis}').clear_errors()
     
     # Wait for a moment to ensure errors are cleared
     time.sleep(1)
     
     # Print current errors to verify they're cleared
-    print("Current errors:")
-    print(getattr(odrv0, f'axis{axis}').error)
-    print(getattr(odrv0, f'axis{axis}').motor.error)
-    print(getattr(odrv0, f'axis{axis}').encoder.error)
+    axis_error = getattr(odrv0, f'axis{axis}').error
+    motor_error = getattr(odrv0, f'axis{axis}').motor.error 
+    encoder_error = getattr(odrv0, f'axis{axis}').encoder.error
+
+    if axis_error or motor_error or encoder_error:
+        print(f"Axis {axis} errors:")
+        if axis_error:
+            print_errors('axis', axis_error)
+        if motor_error:
+            print_errors('motor', motor_error)
+        if encoder_error:
+            print_errors('encoder', encoder_error)
+        return odrv0, False
     
     # -------- ODrive Configuration --------
     print("Configuring ODrive...")
@@ -51,6 +103,8 @@ def calibrate_axis(odrv0, axis):
     getattr(odrv0, f'axis{axis}').controller.config.vel_limit = 10
     getattr(odrv0, f'axis{axis}').controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
     
+    odrv0 = save_and_reboot(odrv0)
+
     # -------- Motor Calibration --------
     print("Starting motor calibration...")
 
@@ -58,9 +112,10 @@ def calibrate_axis(odrv0, axis):
     wait_for_idle(getattr(odrv0, f'axis{axis}'))
     
     # Check for errors
-    if getattr(odrv0, f'axis{axis}').motor.error != 0:
-        print(f"Motor calibration failed with error: {hex(getattr(odrv0, f'axis{axis}').motor.error)}")
-        return False
+    error = getattr(odrv0, f'axis{axis}').motor.error
+    if error != 0:
+        print_errors('motor', error)
+        return odrv0, False
     else:
         print("Motor calibration successful.")
         # Validate phase resistance and inductance
@@ -86,9 +141,10 @@ def calibrate_axis(odrv0, axis):
     wait_for_idle(getattr(odrv0, f'axis{axis}'))
     
     # Check for errors
-    if getattr(odrv0, f'axis{axis}').encoder.error != 0:
-        print(f"Encoder calibration failed with error: {hex(getattr(odrv0, f'axis{axis}').encoder.error)}")
-        return False
+    error = getattr(odrv0, f'axis{axis}').encoder.error
+    if error != 0:
+        print_errors('encoder', error)
+        return odrv0, False
     else:
         print("Encoder calibration successful.")
         # Validate phase offset float
@@ -127,43 +183,43 @@ def calibrate_axis(odrv0, axis):
     # Set axis to start in closed-loop control on startup
     getattr(odrv0, f'axis{axis}').config.startup_closed_loop_control = True
 
-    return True
+    return odrv0, True
 
 # Main script
 print("Finding an ODrive...")
-odrv0 = odrive.find_any()
+try:
+    odrv0 = connect_odrive()
+except:
+    fibre.serial_transport.DEFAULT_BAUDRATE = 115200
+    odrv0 = connect_odrive()
 print("Found ODrive.")
 
-# Ask user which axis to calibrate
-while True:
-    axis_choice = input("Which axis do you want to calibrate? (0, 1, or both): ").lower()
-    if axis_choice in ['0', '1', 'both']:
-        break
-    else:
-        print("Invalid input. Please enter 0, 1, or both.")
+confirmation = input("Make sure the wheels are lifted on the ground before proceeeding.\n\nAre the wheels off the ground? [yes/no] ").lower()
+if confirmation.lower() != 'yes':
+    print('Rerun this script once the wheels have been lifted off the ground.')
+    exit(0)
+print()
 
-axes_to_calibrate = [0, 1] if axis_choice == 'both' else [int(axis_choice)]
-
-for axis in axes_to_calibrate:
-    if calibrate_axis(odrv0, axis):
-        print(f"Axis {axis} calibration completed successfully.")
+for axis in [0,1]:
+    odrv0, success = calibrate_axis(odrv0, axis)
+    if success:
+        print('\033[92m' + f"Axis {axis} calibration completed successfully." + '\033[0m')
+        print()
     else:
-        print(f"Axis {axis} calibration failed.")
+        print('\033[91m' + f"Axis {axis} calibration failed." + '\033[0m')
+        print('\nPlease fix the issue with this axis before rerunning this script.')
+        exit(0)
 
 # Set the UART baudrate to a higher level
-odrv0.config.uart_baudrate = 4*115200
+try:
+    odrv0.config.uart_baudrate = 4*115200
+except Exception:
+    # Close the hanging connection
+    odrv0.__channel__.serial_device.close()
+
+fibre.serial_transport.DEFAULT_BAUDRATE = 4*115200
 
 # Final save and reboot
-print("Saving configuration and rebooting ODrive...")
-odrv0.save_configuration()
+odrv0 = save_and_reboot(odrv0)
 
-# Handle the expected exception during reboot
-try:
-    odrv0.reboot()
-except:
-    pass  # The exception is expected due to the USB connection loss
-
-# Reconnect to ODrive after reboot
-odrv0 = reconnect_odrive()
-
-print("ODrive setup complete.")
+print('\033[94m' + "\nODrive setup complete." + '\033[0m')

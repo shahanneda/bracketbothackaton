@@ -16,7 +16,7 @@ client = ElevenLabs(
 )
 
 audio = client.generate(
-    text="hey bracketbot, how are you?, what are you doing? what is your name?",
+    text="This is a test of the speaker",
     voice="Brian",
     # voice="tdr2UZjCfSq8qpr5CfgU",
     # voice="ceicSWVDzgXoWidth8WQ", #raphael

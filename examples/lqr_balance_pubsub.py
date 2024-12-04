@@ -1,11 +1,16 @@
+# Adds the lib directory to the Python path
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 import time
 import traceback
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-from imu import FilteredLSM6DS3
-from odrive_uart import ODriveUART, reset_odrive
-from lqr import LQR_gains
+from lib.imu import FilteredMPU6050
+from lib.odrive_uart import ODriveUART, reset_odrive
+from lib.lqr import LQR_gains
 import json
 from threading import Thread
 import paho.mqtt.client as mqtt
@@ -63,14 +68,14 @@ def balance():
     watchdog_client.connect("localhost")
 
     # Initialize IMU and LQR gains (same as original)
-    imu = FilteredLSM6DS3()
+    imu = FilteredMPU6050()
     K_balance = LQR_gains(Q_diag=[100,10,100,1,10,1], R_diag=[0.2, 1])
     K_drive = LQR_gains(Q_diag=[1,100,1,1,1,10], R_diag=[0.1, 1])
     print(K_balance.round(2))
-    Dt = 1./400.
+    Dt = 1./100.
 
     # Initialize variables
-    zero_angle = -1
+    zero_angle = 3.0
     start_plot_time = time.time()
 
     # Initialize plotting arrays (same as original)
@@ -87,14 +92,14 @@ def balance():
 
     # Initialize motors (same as original)
     try:
-        with open('motor_dir.json', 'r') as f:
+        with open(os.path.expanduser('~/quickstart/lib/motor_dir.json'), 'r') as f:
             motor_dirs = json.load(f)
             left_dir = motor_dirs['left']
             right_dir = motor_dirs['right']
     except Exception as e:
         raise Exception("Error reading motor_dir.json")
 
-    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=left_dir, dir_right=right_dir)
+    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
     motor_controller.start_left()
     motor_controller.enable_torque_mode_left()
     motor_controller.start_right()
@@ -107,7 +112,7 @@ def balance():
         reset_odrive()
         time.sleep(1)  # Give ODrive time to reset
         try:
-            motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=left_dir, dir_right=right_dir)
+            motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
             motor_controller.clear_errors_left()
             motor_controller.clear_errors_right()
             motor_controller.enable_torque_mode_left()
@@ -169,7 +174,8 @@ def balance():
                 start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2*WHEEL_DIST)
 
             # Rest of the control loop (same as original)
-            current_pitch = imu.robot_angle() 
+            pitch, roll, yaw = imu.get_orientation()
+            current_pitch = -pitch
             current_yaw_rate = -imu.gyro_RAW[2]
             current_pitch_rate = imu.gyro_RAW[0]
 

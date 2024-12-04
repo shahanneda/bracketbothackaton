@@ -23,7 +23,7 @@ class ODriveUART:
         timeout=1
     )
 
-    def __init__(self, port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=1, dir_right=1):
+    def __init__(self, port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=1, dir_right=1):
         self.bus = serial.Serial(
             port=port,
             baudrate=460800,
@@ -226,16 +226,16 @@ if __name__ == '__main__':
     except Exception as e:
         raise Exception("Error reading motor_dir.json")
 
-    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=1, right_axis=0, dir_left=left_dir, dir_right=right_dir)
+    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
 
     motor_controller.start_left()
     motor_controller.start_right()
 
     try:
         motor_controller.set_speed_rpm_right(20)
-        time.sleep(3)
+        time.sleep(1)
         motor_controller.set_speed_rpm_left(20)
-        time.sleep(3)
+        time.sleep(1)
 
         while True:
             # Check for errors and clear if necessary
