@@ -59,18 +59,48 @@ class ODriveUART:
     def get_errors_right(self):
         return self.get_errors(self.right_axis)
 
-    def get_errors(self, axis):
-        error_code = -1
-        error_name = 'Unknown error'
-        error_response = self.send_command(f'r axis{axis}.error')
-        try:
-            cleaned_response = ''.join(c for c in error_response if c.isdigit())
-            error_code = int(cleaned_response)
-            error_name = self.ERROR_DICT.get(error_code, error_name)
-        except ValueError:
-            print(f"Unexpected error response format: {error_response}")
-        return error_code, error_name
-        
+    def has_errors(self):
+        for axis in [0,1]:
+            error_response = self.send_command(f'r axis{axis}.error')
+            try:
+                cleaned_response = ''.join(c for c in error_response if c.isdigit())
+                error_code = int(cleaned_response)
+            except ValueError:
+                print(f"Unexpected error response format: {error_response}")
+                return True
+            if error_code != 0:
+                return True
+        return False    
+    
+    def dump_errors(self):
+        error_sources = [
+            "axis0","axis0.encoder", "axis0.controller", "axis0.motor",
+            "axis1","axis1.encoder", "axis1.controller", "axis1.motor"
+        ]
+        print('======= ODrive Errors =======')
+        for src in error_sources:
+            error_response = self.send_command(f'r {src}.error')
+            try:
+                cleaned_response = ''.join(c for c in error_response if c.isdigit())
+                error_code = int(cleaned_response)
+            except ValueError:
+                print(f"Unexpected error response format: {error_response}")
+                continue
+
+            if error_code == 0:
+                print(src+'.error=0x0: \033[92mNone\033[0m')
+                continue
+
+            error_prefix = f"{src.split('.')[-1].strip('01').upper()}_ERROR"
+            error_dict = {name: value for name, value in vars(odrive.enums).items() if name.startswith(error_prefix)}
+            error_string = ""
+            for error_name, code in error_dict.items():
+                if error_code & code:
+                    error_string += f"{error_name.replace(error_prefix + '_', '').lower().replace('_', ' ')}, "
+            error_string = error_string.rstrip(", ")
+            print(f"{src}.error={hex(error_code)}: \033[91m{error_string}\033[0m")
+        print('=============================')
+
     def enable_torque_mode_left(self):
         self.enable_torque_mode(self.left_axis)
 
@@ -164,7 +194,8 @@ class ODriveUART:
     def stop(self, axis):
         self.send_command(f'w axis{axis}.controller.input_vel 0')
         self.send_command(f'w axis{axis}.controller.input_torque 0')
-        self.send_command(f'w axis{axis}.requested_state 1')
+        # Going at high torque and changing to idle causes overcurrent
+        # self.send_command(f'w axis{axis}.requested_state 1')
 
     def check_errors_left(self):
         return self.check_errors(self.left_axis)
