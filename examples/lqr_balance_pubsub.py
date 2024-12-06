@@ -72,7 +72,7 @@ def balance():
     K_balance = LQR_gains(Q_diag=[100,10,100,1,10,1], R_diag=[0.2, 1])
     K_drive = LQR_gains(Q_diag=[1,100,1,1,1,10], R_diag=[0.1, 1])
     print(K_balance.round(2))
-    Dt = 1./100.
+    Dt = 1./200.
 
     # Initialize variables
     zero_angle = 3.0

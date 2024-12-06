@@ -42,9 +42,9 @@ pip install RPi.GPIO rpi-lgpio
 echo "Installing Adafruit MPU6050 library..."
 pip install adafruit-circuitpython-mpu6050
 
-# Install mosquitto broker and clients
-echo "Installing mosquitto broker and clients..."
-sudo apt install -y mosquitto mosquitto-clients ufw
+# Install mosquitto broker and clients and tmux
+echo "Installing mosquitto broker and clients and tmux..."
+sudo apt install -y mosquitto mosquitto-clients ufw tmux
 sudo systemctl enable mosquitto
 sudo systemctl start mosquitto
 
@@ -89,26 +89,13 @@ sudo usermod -a -G dialout,audio $USER
 echo "Configuring boot settings..."
 sudo sh -c 'printf "\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\n" >> /boot/firmware/config.txt'
 
-# Install git
-# echo "Installing git..."
-# sudo apt install -y git
-
-# # Clone the BracketBot quickstart repository
-# echo "Cloning the BracketBot quickstart repository..."
-# cd ~
-# git clone https://github.com/BracketBotCapstone/quickstart
-# cd quickstart
-
 # Install required Python packages
 echo "Installing required Python packages..."
-pip install numpy sympy control matplotlib pyserial
+pip install numpy sympy control matplotlib pyserial libtmux
 
-# Inform the user about the calibration step
-echo -e "\e[1;33mPlease ensure the ODrive is connected via USB before proceeding.\e[0m"
-read -p "Press Enter once the ODrive is connected..."
+# Inform user about required reboot
+echo -e "\e[1;33mA reboot is required for all changes to take effect.\e[0m"
+read -p "Press Enter to reboot the system now, or Ctrl+C to cancel..."
 
-# Run the calibration script
-echo "Running the ODrive calibration script..."
-python3 ~/quickstart/setup/calibrate_odrive.py
-
-echo "Setup complete! You may need to reboot your system for all changes to take effect."
+# Reboot the system
+sudo reboot
