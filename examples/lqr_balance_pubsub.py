@@ -4,17 +4,18 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import time
+import json
 import traceback
-import os
 import numpy as np
 import matplotlib.pyplot as plt
+from collections import deque
+from threading import Event, Thread
+
+import paho.mqtt.client as mqtt
+from RPi import GPIO
 from lib.imu import FilteredMPU6050
 from lib.odrive_uart import ODriveUART, reset_odrive
 from lib.lqr import LQR_gains
-import json
-from threading import Thread
-import paho.mqtt.client as mqtt
-from RPi import GPIO
 
 # GPIO setup for resetting ODrive
 GPIO.setmode(GPIO.BCM)
@@ -26,18 +27,19 @@ WHEEL_DIST = 0.235
 YAW_RATE_TO_MOTOR_TORQUE = (WHEEL_DIST / WHEEL_RADIUS) * 0.1
 MOTOR_TURNS_TO_LINEAR_POS = WHEEL_RADIUS * 2 * np.pi
 RPM_TO_METERS_PER_SECOND = WHEEL_RADIUS * 2 * np.pi / 60
-MAX_TORQUE = 2.5
+MAX_TORQUE = 5.0
 MAX_SPEED = 1.0
 
 
 class MqttSubscriber(Thread):
     def __init__(self, broker_address="localhost", topic="robot/velocity"):
-        super().__init__()
+        super().__init__(daemon=True)
         self.broker_address = broker_address
         self.topic = topic
         self.desired_vel = 0
         self.desired_yaw_rate = 0
         self.client = mqtt.Client()
+        self._stop_event = Event()
 
     def on_connect(self, client, userdata, flags, rc):
         print(f"Connected with result code {rc}")
@@ -51,11 +53,17 @@ class MqttSubscriber(Thread):
         except json.JSONDecodeError as e:
             print(f"Error decoding JSON: {e}")
 
+    def stop(self):
+        self._stop_event.set()
+        self.client.disconnect()
+
     def run(self):
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         self.client.connect(self.broker_address)
-        self.client.loop_forever()
+        self.client.loop_start()
+        self._stop_event.wait()  # Wait for stop event instead of sleeping
+        self.client.loop_stop()
 
 
 def balance():
@@ -70,9 +78,9 @@ def balance():
     # Initialize IMU and LQR gains (same as original)
     imu = FilteredMPU6050()
     K_balance = LQR_gains(Q_diag=[100,10,100,1,10,1], R_diag=[0.2, 1])
-    K_drive = LQR_gains(Q_diag=[1,100,1,1,1,10], R_diag=[0.1, 1])
+    K_drive = LQR_gains(Q_diag=[1,100,1,1,1,10], R_diag=[0.2, 1])
     print(K_balance.round(2))
-    Dt = 1./100.
+    Dt = 1./200.
 
     # Initialize variables
     zero_angle = 3.0
@@ -85,10 +93,11 @@ def balance():
     pitch_rates, desired_pitch_rates = [], []
     yaws, desired_yaws = [], []
     yaw_rates, desired_yaw_rates = [], []
+    torques = deque(maxlen=200)
 
     # Reset ODrive and initialize motors
-    # reset_odrive()
-    # time.sleep(1)
+    reset_odrive()
+    time.sleep(1)
 
     # Initialize motors (same as original)
     try:
@@ -100,6 +109,8 @@ def balance():
         raise Exception("Error reading motor_dir.json")
 
     motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
+    motor_controller.clear_errors_left()
+    motor_controller.clear_errors_right()
     motor_controller.start_left()
     motor_controller.enable_torque_mode_left()
     motor_controller.start_right()
@@ -149,10 +160,8 @@ def balance():
 
             if cycle_count % 20 == 0:
                 try:
-                    left_error_code, left_error = motor_controller.get_errors_left()
-                    right_error_code, right_error = motor_controller.get_errors_right()
-                    if left_error_code != 0 or right_error_code != 0:
-                        print(f"Detected ODriveUART errors - Left: {left_error_code} ({left_error}), Right: {right_error_code} ({right_error})")
+                    if motor_controller.has_errors():
+                        motor_controller.dump_errors()
                         reset_and_initialize_motors()
                         continue
                 except Exception as e:
@@ -174,7 +183,10 @@ def balance():
                 start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2*WHEEL_DIST)
 
             # Rest of the control loop (same as original)
-            pitch, roll, yaw = imu.get_orientation()
+            try:
+                pitch, roll, yaw = imu.get_orientation()
+            except:
+                continue
             current_pitch = -pitch
             current_yaw_rate = -imu.gyro_RAW[2]
             current_pitch_rate = imu.gyro_RAW[0]
@@ -238,6 +250,9 @@ def balance():
             # Limit torques
             left_torque = np.clip(left_torque, -MAX_TORQUE, MAX_TORQUE)
             right_torque = np.clip(right_torque, -MAX_TORQUE, MAX_TORQUE)
+            torques.append((np.abs(left_torque) + np.abs(right_torque)/2))
+            if len(torques) == 200 and np.all(np.array(torques) > 0.99*MAX_TORQUE):
+                break
 
             # Apply torques
             try:
@@ -249,7 +264,7 @@ def balance():
                 continue
 
             if cycle_count % 50 == 0:
-                print(f"Loop time: {time.time() - loop_start_time:.6f} sec, x=[{current_pos:.2f} | 0], v=[{current_vel:.2f} | {desired_vel:.2f}], θ=[{current_pitch:.2f} | {zero_angle:.2f}], ω=[{current_pitch_rate:.2f} | 0], δ=[{current_yaw:.2f} | 0], δ'=[{current_yaw_rate:.2f} | {desired_yaw_rate:.2f}]")
+                print(f"Loop time: {time.time() - loop_start_time:.6f} sec, u={(float(left_torque), float(right_torque))}, x=[{current_pos:.2f} | 0], v=[{current_vel:.2f} | {desired_vel:.2f}], θ=[{current_pitch:.2f} | {zero_angle:.2f}], ω=[{current_pitch_rate:.2f} | 0], δ=[{current_yaw:.2f} | 0], δ'=[{current_yaw_rate:.2f} | {desired_yaw_rate:.2f}]")
 
             cycle_count += 1
             time.sleep(max(0, Dt - (time.time() - current_time)))
@@ -263,10 +278,13 @@ def balance():
 
     finally:
         # Cleanup
+        mqtt_control.stop()
         motor_controller.disable_watchdog_left()
         motor_controller.disable_watchdog_right()
         motor_controller.stop_left()
         motor_controller.stop_right()
+        motor_controller.clear_errors_left()
+        motor_controller.clear_errors_right()
 
         # Create the plots
         fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 12))
