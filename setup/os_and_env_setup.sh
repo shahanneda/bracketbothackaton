@@ -87,7 +87,7 @@ sudo usermod -a -G dialout,audio $USER
 
 # Configure boot settings
 echo "Configuring boot settings..."
-sudo sh -c 'printf "\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\n" >> /boot/firmware/config.txt'
+sudo sh -c 'printf "\ndisable_poe_fan=1\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\n" >> /boot/firmware/config.txt'
 
 # Install git
 # echo "Installing git..."
