@@ -19,7 +19,7 @@ sudo SYSTEMD_PAGER='' systemctl status ssh
 
 # Install Python development packages
 echo "Installing Python development packages..."
-sudo apt install -y python3-dev python3-pip python3-venv
+sudo apt install -y python3-dev python3-pip python3-venv tmux
 
 # Create a Python virtual environment in the home directory
 echo "Creating a Python virtual environment..."
@@ -101,14 +101,6 @@ sudo sh -c 'printf "\ndisable_poe_fan=1\nenable_uart=1\ndtoverlay=uart1-pi5\ndtp
 
 # Install required Python packages
 echo "Installing required Python packages..."
-pip install numpy sympy control matplotlib pyserial
+pip install numpy sympy control matplotlib pyserial libtmux
 
-# Inform the user about the calibration step
-echo -e "\e[1;33mPlease ensure the ODrive is connected via USB before proceeding.\e[0m"
-read -p "Press Enter once the ODrive is connected..."
-
-# Run the calibration script
-echo "Running the ODrive calibration script..."
-python3 ~/quickstart/setup/calibrate_odrive.py
-
-echo "Setup complete! You may need to reboot your system for all changes to take effect."
+echo "Setup complete! You NEED TO REBOOT BEFORE RUNNING THE ODRIVE CALIBRATION"
