@@ -17,6 +17,24 @@ sudo systemctl start ssh
 echo "Checking SSH service status..."
 sudo SYSTEMD_PAGER='' systemctl status ssh
 
+# Install Atuin
+echo "Installing Atuin..."
+curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh | sh
+
+# Configure Atuin to disable up arrow key binding
+echo "Configuring Atuin to disable up arrow key binding..."
+
+# Remove existing Atuin init lines if any
+sed -i '/eval "$(atuin init/d' "$HOME/.bashrc"
+
+# Add Atuin init with --disable-up-arrow option
+echo 'eval "$(atuin init bash --disable-up-arrow)"' >> "$HOME/.bashrc"
+
+
+
+
+
+
 # Install Python development packages
 echo "Installing Python development packages..."
 sudo apt install -y python3-dev python3-pip python3-venv tmux
