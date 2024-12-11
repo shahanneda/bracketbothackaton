@@ -83,7 +83,7 @@ def balance():
     Dt = 1./200.
 
     # Initialize variables
-    zero_angle = 3.0
+    zero_angle = 0.0
     start_plot_time = time.time()
 
     # Initialize plotting arrays (same as original)
