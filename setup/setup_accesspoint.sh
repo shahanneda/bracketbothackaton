@@ -28,6 +28,49 @@ SETUP_SCRIPT="/usr/local/bin/setup_hotspot.sh"
 SYSTEMD_SERVICE="/etc/systemd/system/hotspot.service"
 
 # ============================
+# Check if Script Has Been Run Before
+# ============================
+
+if [ -f "$SETUP_SCRIPT" ] || [ -f "$SYSTEMD_SERVICE" ]; then
+    echo "It appears that this script has been run before."
+    echo "Do you want to:"
+    echo "  1) Stop running the script"
+    echo "  2) Delete the previous setup and run it again"
+    read -p "Please enter your choice [1/2]: " choice
+    if [ "$choice" == "1" ]; then
+        echo "Exiting script."
+        exit 0
+    elif [ "$choice" == "2" ]; then
+        echo "Cleaning up previous setup..."
+
+        # Stop and disable the systemd service
+        if systemctl is-active --quiet hotspot.service; then
+            sudo systemctl stop hotspot.service
+        fi
+        sudo systemctl disable hotspot.service 2>/dev/null || true
+
+        # Remove the systemd service file
+        sudo rm -f "$SYSTEMD_SERVICE"
+
+        # Reload systemd daemon
+        sudo systemctl daemon-reload
+
+        # Remove the setup script
+        sudo rm -f "$SETUP_SCRIPT"
+
+        # Delete the hotspot connection if it exists
+        if nmcli connection show | grep -q "$CONNECTION_NAME"; then
+            sudo nmcli connection delete "$CONNECTION_NAME"
+        fi
+
+        echo "Previous setup has been cleaned up."
+    else
+        echo "Invalid choice. Exiting."
+        exit 1
+    fi
+fi
+
+# ============================
 # Step 1: Create the Hotspot Setup Script
 # ============================
 

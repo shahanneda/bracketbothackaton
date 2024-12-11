@@ -32,7 +32,9 @@ source ~/.venv/bin/activate
 
 # Make the virtual environment activate automatically in new terminals
 echo "Configuring automatic virtual environment activation..."
-echo 'source ~/.venv/bin/activate' >> ~/.bashrc
+if ! grep -Fxq 'source ~/.venv/bin/activate' ~/.bashrc; then
+    echo 'source ~/.venv/bin/activate' >> ~/.bashrc
+fi
 
 # Install RPi.GPIO and lgpio libraries inside the virtual environment
 echo "Installing RPi.GPIO and lgpio libraries..."
@@ -103,4 +105,21 @@ sudo sh -c 'printf "\ndisable_poe_fan=1\nenable_uart=1\ndtoverlay=uart1-pi5\ndtp
 echo "Installing required Python packages..."
 pip install numpy sympy control matplotlib pyserial libtmux
 
-echo "Setup complete! You NEED TO REBOOT BEFORE RUNNING THE ODRIVE CALIBRATION"
+# Setup WiFi Access Point
+echo -e "\nWould you like to set up a WiFi access point? (y/n)"
+read -r setup_ap
+if [[ "$setup_ap" =~ ^[Yy]$ ]]; then
+    echo "Setting up WiFi access point..."
+    bash "$HOME/quickstart/setup/setup_accesspoint.sh"
+else
+    echo "Skipping WiFi access point setup..."
+fi
+
+
+echo -e "\e[31mSetup complete! You NEED TO REBOOT BEFORE RUNNING THE ODRIVE CALIBRATION\e[0m"
+echo -e "\e[31mRebooting in:\e[0m"
+for i in {20..1}; do
+    echo -e "\e[31m$i...\e[0m"
+    sleep 1
+done
+sudo reboot
