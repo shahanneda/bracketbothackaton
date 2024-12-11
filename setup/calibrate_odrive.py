@@ -19,7 +19,11 @@ def wait_for_idle(axis):
 # Helper function to reconnect to the ODrive after reboot
 def connect_odrive():
     print("Connecting to ODrive...")
-    return odrive.find_any(path='serial:/dev/ttyAMA1')
+    import odrive
+    odrv = odrive.find_any(path='serial:/dev/ttyAMA1', timeout=5)
+    if odrv is None:
+        raise Exception('ODrive timed out')
+    return odrv
 
 def save_and_reboot(odrv):
     print("Saving configuration...")
