@@ -19,7 +19,6 @@ from tempfile import NamedTemporaryFile
 import subprocess
 import alsaaudio
 
-
 dotenv.load_dotenv()
 
 def set_alsa_volume(volume=75):
@@ -122,7 +121,7 @@ def transcribe_audio(audio_file):
 def extract_name_from_transcript(transcript):
     client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are a helpful assistant that extracts names from transcripts. You only respond with the name."},
             {"role": "user", "content": "Extract the name from the following transcript: " + transcript}
@@ -159,10 +158,13 @@ def search_faces(client, collection_id, image_path, last_name):
                         name = extract_name_from_transcript(transcript)
                         play_text_sound(f"Nice to meet you, {name}")
                         
-                        if index_face(client, collection_id, image_path, name):
-                            last_name = name
+                        index_result = index_face(client, collection_id, image_path, name)
+                        if index_result:
+                            print(f"Successfully indexed face for {name}")
+                            return index_result, name
                         else:
-                            last_name = None
+                            print("Failed to index face")
+                            return None, None
                     else:
                         play_text_sound("I'm sorry, I couldn't understand that")
                         last_name = None

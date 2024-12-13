@@ -53,10 +53,10 @@ def set_servo_positions(duty_cycle):
 
 def check_watchdog(watchdog):
     current_time = time.time()
-    if current_time - watchdog.last_timestamp > 0.1:
-        set_servo_positions(error_duty)
+    if current_time - watchdog.last_timestamp > 0.5:  # Half second delay before deploying legs
+        set_servo_positions(error_duty)  # Legs out
     else:
-        set_servo_positions(ok_duty)
+        set_servo_positions(ok_duty)  # Legs in
 
 # Initialize MQTT subscriber
 watchdog = WatchdogSubscriber()

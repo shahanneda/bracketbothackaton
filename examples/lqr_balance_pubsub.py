@@ -16,6 +16,7 @@ from RPi import GPIO
 from lib.imu import FilteredMPU6050
 from lib.odrive_uart import ODriveUART, reset_odrive
 from lib.lqr import LQR_gains
+from lib.data_logger import DataLogger
 
 # GPIO setup for resetting ODrive
 GPIO.setmode(GPIO.BCM)
@@ -27,7 +28,7 @@ WHEEL_DIST = 0.235
 YAW_RATE_TO_MOTOR_TORQUE = (WHEEL_DIST / WHEEL_RADIUS) * 0.1
 MOTOR_TURNS_TO_LINEAR_POS = WHEEL_RADIUS * 2 * np.pi
 RPM_TO_METERS_PER_SECOND = WHEEL_RADIUS * 2 * np.pi / 60
-MAX_TORQUE = 5.0
+MAX_TORQUE = 4.0
 MAX_SPEED = 1.0
 
 
@@ -70,36 +71,54 @@ def balance():
     # Initialize keyboard thread
     mqtt_control = MqttSubscriber()
     mqtt_control.start()
-
-    # Initialize MQTT client for watchdog
+    
+    # Initialize MQTT client for watchdog with better connection handling
     watchdog_client = mqtt.Client()
-    watchdog_client.connect("localhost")
-
-    # Initialize IMU and LQR gains (same as original)
+    watchdog_client.connect("localhost", keepalive=60)  # Add keepalive
+    watchdog_client.loop_start()  # Start background thread for MQTT
+    
+    def safe_publish_watchdog(client, topic, message):
+        try:
+            result = client.publish(topic, message)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                print(f"Failed to publish watchdog message: {result.rc}")
+                # Attempt to reconnect
+                client.reconnect()
+        except Exception as e:
+            print(f"Error publishing watchdog: {e}")
+            try:
+                client.reconnect()
+            except:
+                pass
+    
+    # Initialize IMU and LQR gains
     imu = FilteredMPU6050()
     K_balance = LQR_gains(Q_diag=[100,10,100,1,10,1], R_diag=[0.2, 1])
     K_drive = LQR_gains(Q_diag=[1,100,1,1,1,10], R_diag=[0.2, 1])
     print(K_balance.round(2))
     Dt = 1./200.
-
+    
+    # Constants for idle mode
+    SIGNIFICANT_VELOCITY = 0.2  # m/s
+    IDLE_TIMEOUT = 5  # seconds
+    IDLE_BALANCE_DURATION = 1  # seconds
+    
     # Initialize variables
-    zero_angle = 0.0
+    zero_angle = 2.0
     start_plot_time = time.time()
-
-    # Initialize plotting arrays (same as original)
-    times, positions, desired_positions = [], [], []
-    velocities, desired_velocities = [], []
-    pitches, desired_pitches = [], []
-    pitch_rates, desired_pitch_rates = [], []
-    yaws, desired_yaws = [], []
-    yaw_rates, desired_yaw_rates = [], []
-    torques = deque(maxlen=200)
-
+    last_significant_velocity_time = start_plot_time
+    state = 'BALANCING'
+    t_idle_wait_start = None
+    t_wakeup_start = None
+    
+    # Initialize data logger
+    data_logger = DataLogger()
+    
     # Reset ODrive and initialize motors
     reset_odrive()
     time.sleep(1)
-
-    # Initialize motors (same as original)
+    
+    # Initialize motors
     try:
         with open(os.path.expanduser('~/quickstart/lib/motor_dir.json'), 'r') as f:
             motor_dirs = json.load(f)
@@ -107,8 +126,14 @@ def balance():
             right_dir = motor_dirs['right']
     except Exception as e:
         raise Exception("Error reading motor_dir.json")
-
-    motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
+    
+    motor_controller = ODriveUART(
+        port='/dev/ttyAMA1',
+        left_axis=0,
+        right_axis=1,
+        dir_left=left_dir,
+        dir_right=right_dir
+    )
     motor_controller.clear_errors_left()
     motor_controller.clear_errors_right()
     motor_controller.start_left()
@@ -117,13 +142,18 @@ def balance():
     motor_controller.enable_torque_mode_right()
     motor_controller.set_speed_rpm_left(0)
     motor_controller.set_speed_rpm_right(0)
-
+    
     def reset_and_initialize_motors():
         nonlocal motor_controller
         reset_odrive()
-        time.sleep(1)  # Give ODrive time to reset
         try:
-            motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=left_dir, dir_right=right_dir)
+            motor_controller = ODriveUART(
+                port='/dev/ttyAMA1',
+                left_axis=0,
+                right_axis=1,
+                dir_left=left_dir,
+                dir_right=right_dir
+            )
             motor_controller.clear_errors_left()
             motor_controller.clear_errors_right()
             motor_controller.enable_torque_mode_left()
@@ -133,31 +163,95 @@ def balance():
             print("Motors re-initialized successfully.")
         except Exception as e:
             print(f"Error re-initializing motors: {e}")
-
+    
     # Record starting position
     try:
         l_pos = motor_controller.get_position_turns_left()
         r_pos = motor_controller.get_position_turns_right()
         start_pos = (l_pos + r_pos) / 2 * MOTOR_TURNS_TO_LINEAR_POS
-        start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2*WHEEL_DIST)
+        start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2 * WHEEL_DIST)
     except Exception as e:
         print(f"Error reading initial motor positions: {e}")
         return
-
+    
     imu.calibrate()
     cycle_count = 0
     is_pos_control = True
-
+    
     try:
         motor_controller.enable_watchdog_left()
         motor_controller.enable_watchdog_right()
-
+    
         while True:
             loop_start_time = time.time()
+            current_time = time.time()
 
-            # Feed the watchdog
-            watchdog_client.publish("balance_watchdog", str(time.time()))
+            # Check state transitions
+            if state == 'BALANCING':
+                # Feed the watchdog
+                safe_publish_watchdog(watchdog_client, "balance_watchdog", str(current_time))
 
+                # Check for idle timeout
+                if current_time - last_significant_velocity_time > IDLE_TIMEOUT:
+                    print("Entering IDLE_WAIT state")
+                    state = 'IDLE_WAIT'
+                    t_idle_wait_start = current_time
+
+            elif state == 'IDLE_WAIT':
+                # Do not feed the watchdog
+                # Continue balancing
+                if current_time - t_idle_wait_start > IDLE_BALANCE_DURATION:
+                    print("Entering IDLE state")
+                    state = 'IDLE'
+                    # Stop motors
+                    try:
+                        motor_controller.set_torque_nm_left(0)
+                        motor_controller.set_torque_nm_right(0)
+                    except Exception as e:
+                        print('Motor controller error during idle:', e)
+
+            elif state == 'IDLE':
+                # Do not feed the watchdog
+                # Do not balance
+                # Check for new velocity commands
+                if mqtt_control.desired_vel != 0 or mqtt_control.desired_yaw_rate != 0:
+                    print("Received new velocity command, entering WAKING_UP state")
+                    state = 'WAKING_UP'
+                    t_wakeup_start = current_time
+                    last_significant_velocity_time = current_time  # Reset velocity timer
+
+            elif state == 'WAKING_UP':
+                # Feed the watchdog immediately during wake-up
+                safe_publish_watchdog(watchdog_client, "balance_watchdog", str(current_time))
+
+                # Use zero desired velocities during wake-up
+                desired_vel = 0
+                desired_yaw_rate = 0
+
+                # Check if wake-up time is over (0.5s for watchdog, then 0.5s for balancing)
+                if current_time - t_wakeup_start > 1:
+                    print("Wake-up period over, entering BALANCING state")
+                    state = 'BALANCING'
+                elif current_time - t_wakeup_start <= 0.75:
+                    # During first 0.5s, don't balance but keep feeding watchdog
+                    try:
+                        motor_controller.set_torque_nm_left(0)
+                        motor_controller.set_torque_nm_right(0)
+                    except Exception as e:
+                        print('Motor controller error during wake-up:', e)
+                    continue
+
+            # Get desired velocity and yaw rate
+            if state == 'WAKING_UP':
+                # Continue using zero velocities during wake-up
+                desired_vel = 0
+                desired_yaw_rate = 0
+            else:
+                # Get desired velocity and yaw rate from MQTT control
+                desired_vel = mqtt_control.desired_vel
+                desired_yaw_rate = mqtt_control.desired_yaw_rate
+    
+            # Motor error checks (every 20 cycles)
             if cycle_count % 20 == 0:
                 try:
                     if motor_controller.has_errors():
@@ -168,21 +262,8 @@ def balance():
                     print('Error checking motor errors:', e)
                     reset_and_initialize_motors()
                     continue
-
-            # Get desired velocity and yaw rate from keyboard thread
-            desired_vel = mqtt_control.desired_vel
-            desired_yaw_rate = mqtt_control.desired_yaw_rate
-            # zero_angle += keyboard_control.zero_angle_adjustment
-
-            was_pos_control = is_pos_control
-            # is_pos_control = False
-            is_pos_control = desired_vel == 0 and desired_yaw_rate == 0 and np.mean(np.abs([0]+velocities[-50:])) < 0.2
-            if is_pos_control and not was_pos_control:
-                start_pos = (l_pos + r_pos) / 2 * MOTOR_TURNS_TO_LINEAR_POS
-            if desired_yaw_rate != 0:
-                start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2*WHEEL_DIST)
-
-            # Rest of the control loop (same as original)
+    
+            # Get IMU data
             try:
                 pitch, roll, yaw = imu.get_orientation()
             except:
@@ -190,92 +271,148 @@ def balance():
             current_pitch = -pitch
             current_yaw_rate = -imu.gyro_RAW[2]
             current_pitch_rate = imu.gyro_RAW[0]
-
-
+    
+            # Get motor data
             try:
                 l_pos, l_vel = motor_controller.get_pos_vel_left()
                 r_pos, r_vel = motor_controller.get_pos_vel_right()
                 current_vel = (l_vel + r_vel) / 2 * RPM_TO_METERS_PER_SECOND
-                current_pos = (l_pos + r_pos) / 2 * MOTOR_TURNS_TO_LINEAR_POS - start_pos
-                current_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2*WHEEL_DIST) - start_yaw
+                current_pos = (
+                    (l_pos + r_pos) / 2 * MOTOR_TURNS_TO_LINEAR_POS - start_pos
+                )
+                current_yaw = (
+                    (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2 * WHEEL_DIST) - start_yaw
+                )
             except Exception as e:
                 print('Motor controller error:', e)
                 reset_and_initialize_motors()
                 continue
-
-            if is_pos_control and abs(current_vel) < 0.01:
-                zero_angle += 0.0002*np.sign(current_pitch-zero_angle)
-
-            # Store data for plotting
-            current_time = time.time()
-            times.append(current_time - start_plot_time)
-            positions.append(current_pos)
-            desired_positions.append(0)
-            velocities.append(current_vel)
-            desired_velocities.append(desired_vel)
-            pitches.append(current_pitch)
-            desired_pitches.append(zero_angle)
-            pitch_rates.append(current_pitch_rate)
-            desired_pitch_rates.append(0)
-            yaws.append(current_yaw)
-            desired_yaws.append(0)
-            yaw_rates.append(current_yaw_rate)
-            desired_yaw_rates.append(desired_yaw_rate)
-
+    
+            # Zero angle adjustment
+            if state == 'BALANCING' and is_pos_control and abs(current_vel) < 0.01:
+                zero_angle += 0.0002 * np.sign(current_pitch - zero_angle)
+    
+            # Log data using keyword arguments
+            data_logger.log(
+                time=current_time - start_plot_time,
+                position=current_pos,
+                desired_position=0,  # Assuming desired position is zero
+                velocity=current_vel,
+                desired_velocity=desired_vel,
+                pitch=current_pitch,
+                desired_pitch=zero_angle,
+                pitch_rate=current_pitch_rate,
+                desired_pitch_rate=0,
+                yaw=current_yaw,
+                desired_yaw=0,  # Assuming desired yaw is zero
+                yaw_rate=current_yaw_rate,
+                desired_yaw_rate=desired_yaw_rate
+            )
+    
+            # Retrieve the list of velocities from DataLogger
+            velocities = data_logger.data.get('velocity', [])
+    
+            # Ensure there are enough velocities to calculate the mean
+            if len(velocities) >= 50:
+                recent_velocities = velocities[-50:]
+            else:
+                recent_velocities = velocities
+    
+            mean_abs_velocity = np.mean(np.abs(recent_velocities))
+    
+            # Control mode adjustments
+            was_pos_control = is_pos_control
+            is_pos_control = (
+                desired_vel == 0 and
+                desired_yaw_rate == 0 and
+                mean_abs_velocity < 0.2
+            )
+            if is_pos_control and not was_pos_control:
+                start_pos = (l_pos + r_pos) / 2 * MOTOR_TURNS_TO_LINEAR_POS
+            if desired_yaw_rate != 0:
+                start_yaw = (l_pos - r_pos) * MOTOR_TURNS_TO_LINEAR_POS / (2 * WHEEL_DIST)
+    
             # Calculate control outputs
             current_state = np.array([
-                current_pos, current_vel, current_pitch*np.pi/180, 
-                current_pitch_rate, current_yaw, current_yaw_rate
+                current_pos,
+                current_vel,
+                current_pitch * np.pi / 180,
+                current_pitch_rate,
+                current_yaw,
+                current_yaw_rate
             ])
-            
+    
             desired_state = np.array([
-                0, desired_vel, zero_angle*np.pi/180, 0, 0, desired_yaw_rate
+                0,
+                desired_vel,
+                zero_angle * np.pi / 180,
+                0,
+                0,
+                desired_yaw_rate
             ])
-
-            state_error = (current_state - desired_state).reshape((6,1))
-
+    
+            state_error = (current_state - desired_state).reshape((6, 1))
+    
             if is_pos_control:
                 # Position control
                 C = -K_balance @ state_error
             else:
                 # Velocity control
-                state_error[0,0] = 0
-                state_error[4,0] = 0
+                state_error[0, 0] = 0
+                state_error[4, 0] = 0
                 C = -K_drive @ state_error
-            
-                
-            D = np.array([[0.5,0.5],[0.5,-0.5]])
+    
+            D = np.array([[0.5, 0.5], [0.5, -0.5]])
             left_torque, right_torque = (D @ C).squeeze()
-
+    
             # Limit torques
             left_torque = np.clip(left_torque, -MAX_TORQUE, MAX_TORQUE)
             right_torque = np.clip(right_torque, -MAX_TORQUE, MAX_TORQUE)
-            torques.append((np.abs(left_torque) + np.abs(right_torque)/2))
-            if len(torques) == 200 and np.all(np.array(torques) > 0.99*MAX_TORQUE):
-                break
-
-            # Apply torques
-            try:
-                motor_controller.set_torque_nm_left(left_torque)
-                motor_controller.set_torque_nm_right(right_torque)
-            except Exception as e:
-                print('Motor controller error:', e)
-                reset_and_initialize_motors()
-                continue
-
+    
+            # Update last significant velocity time
+            if abs(current_vel) > SIGNIFICANT_VELOCITY or abs(desired_vel) > SIGNIFICANT_VELOCITY:
+                last_significant_velocity_time = current_time
+    
+            # Apply torques if balancing
+            if state in ['BALANCING', 'IDLE_WAIT', 'WAKING_UP']:
+                try:
+                    motor_controller.set_torque_nm_left(left_torque)
+                    motor_controller.set_torque_nm_right(right_torque)
+                except Exception as e:
+                    print('Motor controller error:', e)
+                    reset_and_initialize_motors()
+                    continue
+            elif state == 'IDLE':
+                # Ensure motors are stopped
+                try:
+                    motor_controller.set_torque_nm_left(0)
+                    motor_controller.set_torque_nm_right(0)
+                except Exception as e:
+                    print('Motor controller error during idle:', e)
+    
             if cycle_count % 50 == 0:
-                print(f"Loop time: {time.time() - loop_start_time:.6f} sec, u={(float(left_torque), float(right_torque))}, x=[{current_pos:.2f} | 0], v=[{current_vel:.2f} | {desired_vel:.2f}], θ=[{current_pitch:.2f} | {zero_angle:.2f}], ω=[{current_pitch_rate:.2f} | 0], δ=[{current_yaw:.2f} | 0], δ'=[{current_yaw_rate:.2f} | {desired_yaw_rate:.2f}]")
-
+                print(
+                    f"Loop time: {time.time() - loop_start_time:.6f} sec, "
+                    f"u=({float(left_torque):.2f}, {float(right_torque):.2f}), "
+                    f"x=[{current_pos:.2f} | 0], "
+                    f"v=[{current_vel:.2f} | {desired_vel:.2f}], "
+                    f"θ=[{current_pitch:.2f} | {zero_angle:.2f}], "
+                    f"ω=[{current_pitch_rate:.2f} | 0], "
+                    f"δ=[{current_yaw:.2f} | 0], "
+                    f"δ'=[{current_yaw_rate:.2f} | {desired_yaw_rate:.2f}], "
+                    f"state={state}"
+                )
+    
             cycle_count += 1
             time.sleep(max(0, Dt - (time.time() - current_time)))
-
+    
     except KeyboardInterrupt:
         print("Balance stopped by user.")
-
+    
     except Exception as e:
         print("An error occurred:")
         traceback.print_exc()
-
+    
     finally:
         # Cleanup
         mqtt_control.stop()
@@ -285,73 +422,11 @@ def balance():
         motor_controller.stop_right()
         motor_controller.clear_errors_left()
         motor_controller.clear_errors_right()
+        watchdog_client.loop_stop()
+        watchdog_client.disconnect()
 
-        # Create the plots
-        fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 12))
-        
-        # Plot positions (x)
-        ax1.plot(times, positions, label='Current Position')
-        ax1.plot(times, desired_positions, label='Desired Position')
-        ax1.set_xlabel('Time (s)')
-        ax1.set_ylabel('Position (m)')
-        ax1.legend()
-        ax1.grid(True)
-        ax1.set_title('Position')
-        
-        # Plot velocities (v)
-        ax2.plot(times, velocities, label='Current Velocity')
-        ax2.plot(times, desired_velocities, label='Desired Velocity')
-        ax2.set_xlabel('Time (s)')
-        ax2.set_ylabel('Velocity (m/s)')
-        ax2.legend()
-        ax2.grid(True)
-        ax2.set_title('Velocity')
-
-        # Plot pitches
-        ax3.plot(times, pitches, label='Current Pitch')
-        ax3.plot(times, desired_pitches, label='Desired Pitch')
-        ax3.set_xlabel('Time (s)')
-        ax3.set_ylabel('Pitch (deg)')
-        ax3.legend()
-        ax3.grid(True)
-        ax3.set_title('Pitch')
-
-        # Plot pitch rates
-        ax4.plot(times, pitch_rates, label='Current Pitch Rate')
-        ax4.plot(times, desired_pitch_rates, label='Desired Pitch Rate')
-        ax4.set_xlabel('Time (s)')
-        ax4.set_ylabel('Pitch Rate (rad/s)')
-        ax4.legend()
-        ax4.grid(True)
-        ax4.set_title('Pitch Rate')
-        ax4.yaxis.set_major_locator(plt.MultipleLocator(np.pi/2))
-        ax4.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x/np.pi:.1f}π'))
-
-        # Plot yaws
-        ax5.plot(times, yaws, label='Current Yaw')
-        ax5.plot(times, desired_yaws, label='Desired Yaw')
-        ax5.set_xlabel('Time (s)')
-        ax5.set_ylabel('Yaw (rad)')
-        ax5.legend()
-        ax5.grid(True)
-        ax5.set_title('Yaw')
-        ax5.yaxis.set_major_locator(plt.MultipleLocator(np.pi/2))
-        ax5.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x/np.pi:.1f}π'))
-
-        # Plot yaw rates
-        ax6.plot(times, yaw_rates, label='Current Yaw Rate')
-        ax6.plot(times, desired_yaw_rates, label='Desired Yaw Rate')
-        ax6.set_xlabel('Time (s)')
-        ax6.set_ylabel('Yaw Rate (rad/s)')
-        ax6.legend()
-        ax6.grid(True)
-        ax6.set_title('Yaw Rate')
-        ax6.yaxis.set_major_locator(plt.MultipleLocator(np.pi/2))
-        ax6.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x/np.pi:.1f}π'))
-
-        plt.tight_layout()
-        plt.savefig('plots.png')
-        os.system('cursor plots.png')
+        # Plot the data after the loop
+        data_logger.plot(x_key='time')
 
 if __name__ == "__main__":
     balance()
