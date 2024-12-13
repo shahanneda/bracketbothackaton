@@ -64,8 +64,13 @@
     </div>
 
     <script>
-        // MQTT client setup
-        const client = mqtt.connect('ws://beige-desktop.local:9001');
+        // Extract username from URL or use hostname
+        const hostname = window.location.hostname;  // e.g., "beige-desktop.local" or "192.168.1.100"
+        const username = hostname.split('-')[0];    // e.g., "beige" or use full hostname if no hyphen
+        
+        // MQTT client setup - use the extracted username or full hostname
+        const mqttHost = username.includes('.') ? hostname : `${username}-desktop.local`;
+        const client = mqtt.connect(`ws://${mqttHost}:9001`);
         
         client.on('connect', function () {
             document.getElementById('status').style.color = 'green';
