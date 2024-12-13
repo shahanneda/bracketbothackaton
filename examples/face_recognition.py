@@ -47,7 +47,8 @@ def play_text_sound(text):
 
     audio = client.generate(
         text=text,
-        voice="Brian",
+        # voice="Brian",
+        voice="0m2tDjDewtOfXrhxqgrJ",
         model="eleven_multilingual_v2"
     )
 

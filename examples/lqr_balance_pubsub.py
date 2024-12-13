@@ -370,7 +370,10 @@ def balance():
             right_torque = np.clip(right_torque, -MAX_TORQUE, MAX_TORQUE)
     
             # Update last significant velocity time
-            if abs(current_vel) > SIGNIFICANT_VELOCITY or abs(desired_vel) > SIGNIFICANT_VELOCITY:
+            if (abs(current_vel) > SIGNIFICANT_VELOCITY or 
+                abs(desired_vel) > SIGNIFICANT_VELOCITY or
+                abs(current_yaw_rate) > SIGNIFICANT_VELOCITY or 
+                abs(desired_yaw_rate) > SIGNIFICANT_VELOCITY):
                 last_significant_velocity_time = current_time
     
             # Apply torques if balancing

@@ -1,6 +1,18 @@
-__pycache__
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Generated files
 *.png
 *.txt
+*.err
+*.log
+
+# Config and environment files
 motor_dir.json
 .env
+
+# Device tree overlay
 pwm-pi5.dtbo
