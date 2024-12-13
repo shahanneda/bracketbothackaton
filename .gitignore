@@ -3,3 +3,4 @@ __pycache__
 *.txt
 motor_dir.json
 .env
+pwm-pi5.dtbo

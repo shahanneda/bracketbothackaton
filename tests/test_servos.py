@@ -1,40 +1,39 @@
 import time
-from RPi import GPIO
+from rpi_hardware_pwm import HardwarePWM
 
-# GPIO setup for servo control
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(6, GPIO.OUT)
-GPIO.setup(13, GPIO.OUT)
-pwm1 = GPIO.PWM(6, 50)  # 50 Hz frequency for servos
-pwm2 = GPIO.PWM(13, 50)  # Second servo
+# Initialize PWM on the GPIO pin at 50Hz (20ms period)
+PWM_FREQ = 50  # Standard servo frequency
+pwm1 = HardwarePWM(pwm_channel=0, hz=PWM_FREQ, chip=2)  # GPIO 12
 
-# Calculate duty cycles for angles:
-# 90 degrees = 6.5% duty cycle
-# 0 degrees = 2.5% duty cycle
-legs_out = 6.5     # 90 degrees - legs out
-legs_in = 2.5      # 0 degrees - legs in
+# Define duty cycles we want to test
+DUTY_CYCLE_1 = 5.0   # First test duty cycle
+DUTY_CYCLE_2 = 10.5  # Second test duty cycle
 
-# 0.500 ms =  2.5% 20ms/50Hz -> 0 deg
-# 2.500 ms = 12.5% 20ms/50Hz -> 180 deg
+def duty_cycle_to_pulse_width(duty_cycle):
+    # Convert duty cycle percentage to pulse width in milliseconds
+    pulse_width = (duty_cycle / 100) / PWM_FREQ * 1000  # Convert to ms
+    return pulse_width
 
-def set_servo_positions(duty_cycle):
-    pwm1.start(duty_cycle)
-    pwm2.start(duty_cycle)
-    print(f"Set servos to {duty_cycle}%")
-    time.sleep(1.5)  # Wait for servos to reach position
-    pwm1.stop()
-    pwm2.stop()
+try:
+    # Start PWM
+    pwm1.start(0)
+    
+    # Test with 5.0% duty cycle
+    pwm1.change_duty_cycle(DUTY_CYCLE_1)
+    pulse_width = duty_cycle_to_pulse_width(DUTY_CYCLE_1)
+    print(f"Duty cycle {DUTY_CYCLE_1}% = {pulse_width:.2f}ms pulse width")
+    time.sleep(1)
+    
+    # Test with 10.5% duty cycle
+    pwm1.change_duty_cycle(DUTY_CYCLE_2)
+    pulse_width = duty_cycle_to_pulse_width(DUTY_CYCLE_2)
+    print(f"Duty cycle {DUTY_CYCLE_2}% = {pulse_width:.2f}ms pulse width")
+    time.sleep(1)
 
-# set_servo_positions(12.5) # home
-set_servo_positions(6.5)
+except KeyboardInterrupt:
+    pass
 
-# # Test servo positions
-# print("Moving legs out...")
-# set_servo_positions(legs_out)
-
-# time.sleep(1)  # Pause between movements
-
-# print("Moving legs in...")
-# set_servo_positions(legs_in)
-
-# GPIO.cleanup()
+finally:
+    # Stop PWM
+    # pwm1.stop()
+    pass

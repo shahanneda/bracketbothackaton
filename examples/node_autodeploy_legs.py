@@ -1,17 +1,14 @@
 import time
 import os
-from RPi import GPIO
+from rpi_hardware_pwm import HardwarePWM
 import paho.mqtt.client as mqtt
 from threading import Thread
 
-# GPIO setup for servo control
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(6, GPIO.OUT)
-pwm = GPIO.PWM(6, 50)  # 50 Hz frequency for servo
+# Initialize hardware PWM
+pwm = HardwarePWM(pwm_channel=0, hz=50, chip=2)  # GPIO 12, 50 Hz frequency for servo
 
 # Calculate duty cycles for angles:
-# For GPIO 6:
-# Legs out = 10.5% duty cycle
+# Legs out = 10.5% duty cycle  
 # Legs in = 5% duty cycle
 error_duty = 10.5    # Legs out position
 ok_duty = 5.0       # Legs in position
@@ -43,13 +40,19 @@ class WatchdogSubscriber(Thread):
         self.client.connect(self.broker_address)
         self.client.loop_forever()
 
+def duty_cycle_to_pulse_width(duty_cycle):
+    # Convert duty cycle percentage to pulse width in milliseconds
+    pulse_width = (duty_cycle / 100) / 50 * 1000  # Convert to ms
+    return pulse_width
+
 def set_servo_positions(duty_cycle):
     global current_state
     if current_state != duty_cycle:
         # Only change position if needed
-        pwm.start(duty_cycle)
+        pwm.change_duty_cycle(duty_cycle)
         current_state = duty_cycle
-        print(f"Set servo to {duty_cycle}%")
+        pulse_width = duty_cycle_to_pulse_width(duty_cycle)
+        print(f"Set servo to {duty_cycle}% = {pulse_width:.2f}ms pulse width")
 
 def check_watchdog(watchdog):
     current_time = time.time()
@@ -62,7 +65,8 @@ def check_watchdog(watchdog):
 watchdog = WatchdogSubscriber()
 watchdog.start()
 
-# Initial position
+# Start PWM and set initial position
+pwm.start(0)
 set_servo_positions(error_duty)
 
 while True:
