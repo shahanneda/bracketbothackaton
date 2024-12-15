@@ -55,7 +55,7 @@ def set_servo_positions(duty_cycle):
         print(f"Set servo to {duty_cycle}% = {pulse_width:.2f}ms pulse width")
 
 def check_watchdog(watchdog):
-    current_time = time.time()
+    current_time = time.monotonic()
     if current_time - watchdog.last_timestamp > 0.5:  # Half second delay before deploying legs
         set_servo_positions(error_duty)  # Legs out
     else:

@@ -9,13 +9,14 @@ from lib.madgwickahrs import MadgwickAHRS, Quaternion
 
 import time
 import board
-import adafruit_mpu6050
+from adafruit_lsm6ds.lsm6ds3 import LSM6DS3
 
-class FilteredMPU6050():
+class FilteredLSM6DS():
     
     def __init__(self):
-        self.sensor = adafruit_mpu6050.MPU6050(board.I2C())
-        # self.sensor.gyro_range = adafruit_mpu6050.GyroRange.RANGE_500_DPS  # Set gyroscope range to ±1000 dps
+        self.sensor = LSM6DS3(board.I2C())
+        # Set gyroscope range to ±500 dps
+        # self.sensor.gyro_range = adafruit_lsm6ds.GyroRange.RANGE_500_DPS
         self.ahrs = MadgwickAHRS(beta=0.008, zeta=0.)
         self.alpha = 1  # LPF alpha: x[t] := a*x[t] + (1-a)*x[t-1]
         self.gyro_bias = np.array([0., 0., 0.])
@@ -42,7 +43,6 @@ class FilteredMPU6050():
         self.quat = self._calculate_initial_q(self.accel)
         self.grav = self.quat_rotate(self.quat.conj(), [0, 0, 1])
         self.ahrs.quaternion = self.quat
-
 
     def get_orientation(self):
         self.update()
@@ -86,7 +86,6 @@ class FilteredMPU6050():
         gyro_mapped = np.array([-gyro[1], gyro[0], gyro[2]])
         return accel_mapped, gyro_mapped
 
-
     def update(self):
         # Read and map sensor readings
         self.accel, gyro_raw = self.read_sensor()
@@ -109,14 +108,13 @@ class FilteredMPU6050():
         self.quat = quat.q
         self.grav = self.quat_rotate(quat.conj(), [0, 0, 1])
 
-
     def quat_rotate(self, q, v):
         """Rotate a vector v by a quaternion q"""
         qv = np.concatenate(([0], v))
         return (q * Quaternion(qv) * q.conj()).q[1:]
     
 if __name__ == '__main__':
-    imu = FilteredMPU6050()
+    imu = FilteredLSM6DS()
     imu.calibrate()
     start_time = time.monotonic()
     times = []

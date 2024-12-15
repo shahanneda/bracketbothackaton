@@ -105,7 +105,7 @@ def balance():
     
     # Initialize variables
     zero_angle = 2.0
-    start_plot_time = time.time()
+    start_plot_time = time.monotonic()
     last_significant_velocity_time = start_plot_time
     state = 'BALANCING'
     t_idle_wait_start = None
@@ -183,8 +183,8 @@ def balance():
         motor_controller.enable_watchdog_right()
     
         while True:
-            loop_start_time = time.time()
-            current_time = time.time()
+            loop_start_time = time.monotonic()
+            current_time = time.monotonic()
 
             # Check state transitions
             if state == 'BALANCING':
@@ -267,7 +267,10 @@ def balance():
             try:
                 pitch, roll, yaw = imu.get_orientation()
             except:
+                print('IMU error')
+                reset_and_initialize_motors()
                 continue
+            
             current_pitch = -pitch
             current_yaw_rate = -imu.gyro_RAW[2]
             current_pitch_rate = imu.gyro_RAW[0]
@@ -395,7 +398,7 @@ def balance():
     
             if cycle_count % 50 == 0:
                 print(
-                    f"Loop time: {time.time() - loop_start_time:.6f} sec, "
+                    f"Loop time: {time.monotonic() - loop_start_time:.6f} sec, "
                     f"u=({float(left_torque):.2f}, {float(right_torque):.2f}), "
                     f"x=[{current_pos:.2f} | 0], "
                     f"v=[{current_vel:.2f} | {desired_vel:.2f}], "
@@ -407,7 +410,7 @@ def balance():
                 )
     
             cycle_count += 1
-            time.sleep(max(0, Dt - (time.time() - current_time)))
+            time.sleep(max(0, Dt - (time.monotonic() - current_time)))
     
     except KeyboardInterrupt:
         print("Balance stopped by user.")
