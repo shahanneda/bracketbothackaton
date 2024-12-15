@@ -183,6 +183,7 @@ def balance():
         motor_controller.enable_watchdog_right()
     
         while True:
+            imu.update()
             loop_start_time = time.monotonic()
             current_time = time.monotonic()
 
@@ -265,9 +266,14 @@ def balance():
     
             # Get IMU data
             try:
+                # Get the current orientation angles from the IMU sensor
                 pitch, roll, yaw = imu.get_orientation()
-            except:
-                print('IMU error')
+            except Exception as e:
+                # If there's any error reading from the IMU, print details and reset
+                print('IMU error occurred:')
+                print(f'Error details: {str(e)}')
+                print('Resetting motors and continuing...')
+                traceback.print_exc()  # Print full stack trace
                 reset_and_initialize_motors()
                 continue
             
@@ -408,6 +414,7 @@ def balance():
                     f"δ'=[{current_yaw_rate:.2f} | {desired_yaw_rate:.2f}], "
                     f"state={state}"
                 )
+                data_logger.to_csv('logs.csv', max_num=6000)
     
             cycle_count += 1
             time.sleep(max(0, Dt - (time.monotonic() - current_time)))
