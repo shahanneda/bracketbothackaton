@@ -141,6 +141,11 @@ class ODriveUART:
     def set_speed_rpm(self, axis, rpm, direction):
         rps = rpm / 60
         self.send_command(f'w axis{axis}.controller.input_vel {rps * direction:.4f}')
+        
+    def set_speed_mps(self, axis, mps, direction):
+        WHEEL_DIAMETER_MM = 165
+        rps = mps / (WHEEL_DIAMETER_MM * 0.001 * 3.14159)
+        self.send_command(f'w axis{axis}.controller.input_vel {rps * direction:.4f}')
 
     def set_torque_nm_left(self, nm):
         self.set_torque_nm(self.left_axis, nm, self.dir_left)
@@ -240,6 +245,10 @@ class ODriveUART:
 
     def disable_watchdog(self, axis):
         self.send_command(f'w axis{axis}.config.enable_watchdog 0')
+        
+    def set_watchdog_timeout(self, timeout):
+        self.send_command(f'w axis0.config.watchdog_timeout {timeout}')
+        self.send_command(f'w axis1.config.watchdog_timeout {timeout}')
 
 def reset_odrive():
     GPIO.output(5, GPIO.LOW)
@@ -262,10 +271,13 @@ if __name__ == '__main__':
     motor_controller.start_left()
     motor_controller.start_right()
 
+    motor_controller.enable_velocity_mode_left()
+    motor_controller.enable_velocity_mode_right()
+
     try:
-        motor_controller.set_speed_rpm_right(20)
+        motor_controller.set_speed_mps(0, 0.1, 1)
         time.sleep(1)
-        motor_controller.set_speed_rpm_left(20)
+        motor_controller.set_speed_mps(1, 0.1, -1)
         time.sleep(1)
 
         while True:
