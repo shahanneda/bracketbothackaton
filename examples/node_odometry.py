@@ -24,7 +24,7 @@ ODRIVE_UART_PORT = '/dev/ttyAMA1'  # Adjust as necessary
 
 # Robot parameters
 WHEEL_RADIUS = 0.0825   # meters (adjust based on your robot's wheel radius)
-WHEEL_BASE = 0.400      # meters (track width is 400mm)
+WHEEL_BASE = 0.420      # meters (track width is 400mm)
 
 # ------------------------------------------------------------------------------------
 # Initialize ODrive
@@ -98,13 +98,18 @@ def main():
     prev_left_turns = motor_controller.get_position_turns_left()
     prev_right_turns = motor_controller.get_position_turns_right()
 
-    rate = 50  # Hz
+    rate = 50  # Compute odometry at 50 Hz
+    publish_rate = 5  # Publish odometry at 5 Hz
     dt = 1.0 / rate
+    publish_interval = 1.0 / publish_rate  # Time between publishes in seconds
+    last_publish_time = time.time()
 
     print("[node_odometry.py] Starting odometry node.")
 
     try:
         while True:
+            current_time = time.time()
+
             # Get current encoder turns
             try:
                 curr_left_turns = motor_controller.get_position_turns_left()
@@ -139,14 +144,16 @@ def main():
             # Normalize theta to (-pi, pi]
             theta = (theta + math.pi) % (2 * math.pi) - math.pi
 
-            # Publish odometry data
-            odom_msg = {
-                'x': x,
-                'y': y,
-                'theta': theta
-            }
-            client.publish(MQTT_TOPIC_ODOMETRY, json.dumps(odom_msg))
-            print(f"Published odometry data: {odom_msg}")
+            # Publish odometry data at 5 Hz
+            if current_time - last_publish_time >= publish_interval:
+                odom_msg = {
+                    'x': x,
+                    'y': y,
+                    'theta': theta
+                }
+                client.publish(MQTT_TOPIC_ODOMETRY, json.dumps(odom_msg))
+                print(f"Published odometry data: {odom_msg}")
+                last_publish_time = current_time  # Reset last publish time
 
             # Sleep for the remainder of the loop
             time.sleep(dt)

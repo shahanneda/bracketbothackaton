@@ -43,6 +43,11 @@ robot_half_size = np.array([[0.04, 0.04, 0.9]])   # half extents in x,y,z
 robot_color     = np.array([[1.0, 0.0, 0.0, 0.4]])# RGBA: red, semi-transparent
 
 # -----------------------------------------------------------------------------
+# Global Variables to Store Robot Path
+# -----------------------------------------------------------------------------
+robot_path = []  # List to store robot positions over time
+
+# -----------------------------------------------------------------------------
 # MQTT Callbacks
 # -----------------------------------------------------------------------------
 def on_connect(client, userdata, flags, reason_code, properties=None):
@@ -140,7 +145,7 @@ def on_message(client, userdata, msg):
             theta = odom_data['theta']
 
             # Update the robot's position in Rerun
-            robot_center = np.array([[x, y, 0.45]])  # Update robot's center position
+            robot_center = np.array([[x, y, 0.9]])  # Update robot's center position
 
             # Convert theta (yaw) to quaternion
             # Quaternion representing rotation around Z-axis by angle theta
@@ -160,6 +165,21 @@ def on_message(client, userdata, msg):
                 timeless=False,  # Allow the robot's state to update over time
             )
             print(f"Updated robot position: x={x}, y={y}, theta={theta}")
+
+            # Append the current position to the robot path
+            robot_path.append([x, y, 0.05])  # Z-coordinate is consistent with robot_center
+
+            # Log the robot's path as a LineStrips3D
+            if len(robot_path) > 1:
+                rr.log(
+                    "world/robot_path",
+                    rr.LineStrips3D(
+                        [np.array(robot_path)],  # Wrap in a list to create a single strip
+                        colors=[[0.0, 0.0, 1.0, 1.0]],  # Blue color for the path
+                        radii=0.01  # Thickness of the line
+                    ),
+                    timeless=False,
+                )
 
     except Exception as e:
         print(f"Error processing message: {e}")
