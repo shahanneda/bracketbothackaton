@@ -19,8 +19,8 @@ MQTT_BROKER_ADDRESS = "localhost"
 MQTT_TOPIC = "robot/drive"  # Adjust topic name as needed
 
 # Default driving speed in m/s. Adjust to taste.
-LINEAR_SPEED = 0.2  
-ANGULAR_SPEED = 0.5
+LINEAR_SPEED = 0.3  
+ANGULAR_SPEED = 1.2
 
 # Robot parameters
 WHEEL_RADIUS = 0.0825   # meters (adjust based on your robot's wheel radius)

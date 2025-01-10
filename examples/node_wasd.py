@@ -33,6 +33,7 @@ def press(key):
 
 def release(key):
     # Stop motors when key is released
+    print("Stopping motors")
     client.publish(MQTT_TOPIC, "stop")
 
 try:
@@ -40,7 +41,9 @@ try:
     listen_keyboard(
         on_press=press,
         on_release=release,
-        until='q'
+        delay_second_char=0.1,
+        delay_other_chars=0.01,
+        sequential=True,
     )
 
 except Exception as e:
