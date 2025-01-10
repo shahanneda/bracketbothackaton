@@ -19,11 +19,12 @@ MQTT_BROKER_ADDRESS = "localhost"
 MQTT_TOPIC = "robot/drive"  # Adjust topic name as needed
 
 # Default driving speed in m/s. Adjust to taste.
-SPEED = 0.2  
+LINEAR_SPEED = 0.2  
+ANGULAR_SPEED = 0.5
 
 # Robot parameters
 WHEEL_RADIUS = 0.0825   # meters (adjust based on your robot's wheel radius)
-WHEEL_BASE = 0.165      # meters (distance between the wheels)
+WHEEL_BASE = 0.4      # meters (distance between the wheels)
 
 # ------------------------------------------------------------------------------------
 # Motor Setup
@@ -133,25 +134,25 @@ def forward():
     """
     Drive both motors forward at SPEED m/s.
     """
-    set_velocity(SPEED, 0.0)
+    set_velocity(LINEAR_SPEED, 0.0)
 
 def back():
     """
     Drive both motors backward at SPEED m/s.
     """
-    set_velocity(-SPEED, 0.0)
+    set_velocity(-LINEAR_SPEED, 0.0)
 
 def turn_left():
     """
     Turn left by setting a positive angular velocity.
     """
-    set_velocity(0.0, SPEED)
+    set_velocity(0.0, ANGULAR_SPEED)
 
 def turn_right():
     """
     Turn right by setting a negative angular velocity.
     """
-    set_velocity(0.0, -SPEED)
+    set_velocity(0.0, -ANGULAR_SPEED)
 
 def stop():
     """
