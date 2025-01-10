@@ -13,10 +13,11 @@ from heapq import heappush, heappop
 MQTT_BROKER = "localhost"
 MQTT_PORT   = 1883
 
-# We read the occupancy grid from here
+# Topics
 MQTT_TOPIC_OCC_GRID = "robot/tof_map"
-# We publish paths here
 MQTT_TOPIC_PATH_PLAN = "robot/local_path"
+MQTT_TOPIC_PATH_COMPLETED = "robot/path_completed"  # New topic to subscribe
+MQTT_TOPIC_RESET_ODOMETRY = "robot/reset_odometry"  # New topic
 
 client = mqtt.Client()
 client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
@@ -26,17 +27,28 @@ client.loop_start()
 occupancy_grid = None
 grid_params = {}
 
-# We'll keep track of the current path so we can see if it becomes obstructed
+# We'll keep track of the current path
 current_path_rc = None  # list of (r, c)
 current_path_xy = None  # list of (x, y) in world coords
 
+# Flag to indicate that a new path is needed
+need_new_path = True
+
 # -----------------------------------------------------------------------------
-# MQTT Callback
+# MQTT Callbacks
 # -----------------------------------------------------------------------------
 def on_message(client, userdata, message):
     """
+    General MQTT message handler.
+    """
+    if message.topic == MQTT_TOPIC_OCC_GRID:
+        on_occupancy_grid_message(client, userdata, message)
+    elif message.topic == MQTT_TOPIC_PATH_COMPLETED:
+        on_path_completed_message(client, userdata, message)
+
+def on_occupancy_grid_message(client, userdata, message):
+    """
     Callback for occupancy grid updates.
-    We'll parse the occupancy grid and store it for planning.
     """
     global occupancy_grid, grid_params
 
@@ -67,8 +79,20 @@ def on_message(client, userdata, message):
         "min_y": min_y,
         "max_y": max_y
     }
+    # print("[node_pathplanning.py] Occupancy grid updated.")
 
+def on_path_completed_message(client, userdata, message):
+    """
+    Callback for path completion messages.
+    """
+    global need_new_path
+    # Set the flag to indicate a new path is needed
+    need_new_path = True
+    print("[node_pathplanning.py] Received path completion message.")
+
+# Subscribe to necessary topics
 client.subscribe(MQTT_TOPIC_OCC_GRID)
+client.subscribe(MQTT_TOPIC_PATH_COMPLETED)
 client.on_message = on_message
 
 # -----------------------------------------------------------------------------
@@ -265,74 +289,77 @@ def pick_random_free_cell_in_front(grid, grid_params, robot_r, robot_c,
 def main():
     global occupancy_grid, grid_params
     global current_path_rc, current_path_xy
+    global need_new_path
 
     # Example robot state:
-    #   Suppose the robot is at (x=0, y=0) facing 0 deg in world frame.
-    #   In a real system, you'd read these from odometry / IMU / etc.
+    # Suppose the robot is at (x=0, y=0) facing 0 deg in world frame.
+    # In your actual implementation, get these from the appropriate source.
     robot_x = 0.0
     robot_y = 0.0
     robot_th_deg = 0.0
 
     while True:
         if occupancy_grid is None:
-            print("No occupancy grid yet. Waiting...")
+            print("[node_pathplanning.py] No occupancy grid yet. Waiting...")
             time.sleep(1)
             continue
 
-        # If we have an existing path, check if it's obstructed
-        if current_path_rc is not None:
-            if is_path_obstructed(current_path_rc, occupancy_grid):
-                print("Path became obstructed! We'll pick a new random goal...")
-                current_path_rc = None  # force new path
-            else:
-                # Path is still good, keep using it
-                print("Path is still valid. Continuing to follow it.")
-                # in a real system, you might have code to follow the path here.
-                # we'll just sleep and not choose a new path if it's not obstructed
-                time.sleep(2)
+        if need_new_path:
+            print("[node_pathplanning.py] Planning a new path.")
+            # Get robot position in grid coordinates
+            robot_r, robot_c = world_to_grid(robot_x, robot_y, grid_params)
+            goal_rc = pick_random_free_cell_in_front(
+                occupancy_grid, grid_params,
+                robot_r, robot_c,
+                robot_x, robot_y, robot_th_deg,
+                num_samples=30, max_radius_m=1.5
+            )
+            if goal_rc is None:
+                print("[node_pathplanning.py] No front-facing free cell found. Retrying in 1s...")
+                time.sleep(1)
                 continue
-        
-        # If we get here, either we have no path or the old one was obstructed.
-        # => pick a new random goal in front
-        robot_r, robot_c = world_to_grid(robot_x, robot_y, grid_params)
-        goal_rc = pick_random_free_cell_in_front(
-            occupancy_grid, grid_params,
-            robot_r, robot_c,
-            robot_x, robot_y, robot_th_deg,
-            num_samples=30, max_radius_m=1.5
-        )
-        if goal_rc is None:
-            print("No front-facing free cell found. Retrying in 1s...")
-            time.sleep(1)
-            continue
 
-        # Run A* to that goal
-        path_rc = a_star(occupancy_grid, (robot_r, robot_c), goal_rc)
-        if path_rc is None:
-            print("No path found to the chosen random goal. Trying again...")
-            time.sleep(1)
-            continue
+            # Run A* to that goal
+            path_rc = a_star(occupancy_grid, (robot_r, robot_c), goal_rc)
+            if path_rc is None:
+                print("[node_pathplanning.py] No path found to the chosen random goal. Trying again...")
+                time.sleep(1)
+                continue
 
-        # We have a path. Store it globally, publish it.
-        current_path_rc = path_rc
-        current_path_xy = [grid_to_world(r, c, grid_params) for (r, c) in path_rc]
+            # We have a path. Store it and publish it.
+            current_path_rc = path_rc
+            current_path_xy = [grid_to_world(r, c, grid_params) for (r, c) in path_rc]
 
-        path_msg = {
-            "path_rc": path_rc,
-            "path_xy": current_path_xy
-        }
-        client.publish(MQTT_TOPIC_PATH_PLAN, json.dumps(path_msg))
-        print(f"Published new path with {len(path_rc)} points. Goal cell = {goal_rc}")
+            path_msg = {
+                "path_rc": path_rc,
+                "path_xy": current_path_xy
+            }
+            client.publish(MQTT_TOPIC_PATH_PLAN, json.dumps(path_msg))
+            print(f"[node_pathplanning.py] Published new path with {len(path_rc)} points.")
 
-        # Sleep a bit, then let the loop check if path becomes obstructed, etc.
-        time.sleep(2)
+            # Publish reset odometry message
+            client.publish(MQTT_TOPIC_RESET_ODOMETRY, json.dumps({'reset': True}))
+            print("[node_pathplanning.py] Published odometry reset message.")
 
+            # Reset the flag
+            need_new_path = False
+        else:
+            # Check if the path is still valid
+            if current_path_rc is not None and is_path_obstructed(current_path_rc, occupancy_grid):
+                print("[node_pathplanning.py] Path obstructed. Planning a new path.")
+                need_new_path = True
+            else:
+                # Path is still valid, no need to plan
+                pass
+
+        # Sleep for a short duration before the next iteration
+        time.sleep(1)
 
 try:
     main()
 except KeyboardInterrupt:
-    print("Interrupted by user.")
+    print("\n[node_pathplanning.py] Interrupted by user.")
 finally:
     client.loop_stop()
     client.disconnect()
-    print("MQTT disconnected. Exiting.")
+    print("[node_pathplanning.py] MQTT disconnected. Exiting.")

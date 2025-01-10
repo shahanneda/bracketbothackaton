@@ -21,6 +21,10 @@ MQTT_TOPIC = "robot/drive"  # Adjust topic name as needed
 # Default driving speed in m/s. Adjust to taste.
 SPEED = 0.2  
 
+# Robot parameters
+WHEEL_RADIUS = 0.0825   # meters (adjust based on your robot's wheel radius)
+WHEEL_BASE = 0.165      # meters (distance between the wheels)
+
 # ------------------------------------------------------------------------------------
 # Motor Setup
 # ------------------------------------------------------------------------------------
@@ -60,31 +64,34 @@ motor_controller.clear_errors_right()
 # MQTT Callbacks
 # ------------------------------------------------------------------------------------
 
-def on_connect(client, userdata, flags, rc):
+def on_connect(client, userdata, flags, reason_code, properties):
     """Callback for when the client receives a CONNACK response from the server."""
-    print(f"[MQTT] Connected with result code {rc}")
+    print(f"[MQTT] Connected with result code {reason_code}")
     client.subscribe(MQTT_TOPIC)
     print(f"[MQTT] Subscribed to topic: {MQTT_TOPIC}")
 
 def on_message(client, userdata, msg):
     """
     Callback for when a PUBLISH message is received from the server.
-    We expect JSON messages or simple text commands:
-        - forward
-        - backward
-        - left
-        - right
-        - stop
+    Now handles JSON messages containing 'linear_velocity' and 'angular_velocity',
+    as well as simple text commands.
     """
     try:
         payload = msg.payload.decode().strip()
         print(f"[MQTT] Received message on {msg.topic}: {payload}")
 
-        # If the payload might be JSON, you could parse it:
-        # data = json.loads(payload)
-        # command = data.get("command", "").lower()
+        # Try to parse JSON
+        try:
+            data = json.loads(payload)
+            # Handle data containing 'linear_velocity' and 'angular_velocity'
+            if 'linear_velocity' in data and 'angular_velocity' in data:
+                lin_vel = data['linear_velocity']
+                ang_vel = data['angular_velocity']
+                set_velocity(lin_vel, ang_vel)
+                return
+        except json.JSONDecodeError:
+            pass  # Not JSON, treat as string command
 
-        # But for simplicity, let's just treat the payload as a string command:
         command = payload.lower()
 
         if command == "forward":
@@ -108,44 +115,49 @@ def on_message(client, userdata, msg):
 # Motor Control Functions
 # ------------------------------------------------------------------------------------
 
+def set_velocity(linear_velocity, angular_velocity):
+    """
+    Sets the motor speeds based on desired linear and angular velocities.
+    Assumes differential drive robot.
+    """
+    # Compute wheel linear velocities
+    v_left = linear_velocity - (WHEEL_BASE / 2.0) * angular_velocity
+    v_right = linear_velocity + (WHEEL_BASE / 2.0) * angular_velocity
+
+    # Set the speeds using motor_controller
+    motor_controller.set_speed_mps(0, v_left, left_dir)
+    motor_controller.set_speed_mps(1, v_right, right_dir)
+    print(f"Setting velocities - Left: {v_left} m/s, Right: {v_right} m/s")
+
 def forward():
     """
     Drive both motors forward at SPEED m/s.
     """
-    motor_controller.set_speed_mps(0, SPEED, left_dir)
-    motor_controller.set_speed_mps(1, SPEED, right_dir)
-    print("Driving forward.")
+    set_velocity(SPEED, 0.0)
 
 def back():
     """
     Drive both motors backward at SPEED m/s.
     """
-    motor_controller.set_speed_mps(0, -SPEED, left_dir)
-    motor_controller.set_speed_mps(1, -SPEED, right_dir)
-    print("Driving backward.")
+    set_velocity(-SPEED, 0.0)
 
 def turn_left():
     """
-    Turn left by driving left motor backward and right motor forward.
+    Turn left by setting a positive angular velocity.
     """
-    motor_controller.set_speed_mps(0, -SPEED, left_dir)
-    motor_controller.set_speed_mps(1, SPEED, right_dir)
-    print("Turning left.")
+    set_velocity(0.0, SPEED)
 
 def turn_right():
     """
-    Turn right by driving left motor forward and right motor backward.
+    Turn right by setting a negative angular velocity.
     """
-    motor_controller.set_speed_mps(0, SPEED, left_dir)
-    motor_controller.set_speed_mps(1, -SPEED, right_dir)
-    print("Turning right.")
+    set_velocity(0.0, -SPEED)
 
 def stop():
     """
     Stop both motors.
     """
-    motor_controller.set_speed_mps(0, 0, left_dir)
-    motor_controller.set_speed_mps(1, 0, right_dir)
+    set_velocity(0.0, 0.0)
     print("Stopping.")
 
 # ------------------------------------------------------------------------------------

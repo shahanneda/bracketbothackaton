@@ -9,6 +9,9 @@ __pycache__/
 *.txt
 *.err
 *.log
+*.csv
+*.wav
+*.debug
 
 # Config and environment files
 motor_dir.json
