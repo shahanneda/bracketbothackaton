@@ -10,6 +10,8 @@ import time
 import math
 import json
 import numpy as np
+from typing import List, Dict
+import base64
 
 from RPi import GPIO
 import smbus2
@@ -32,6 +34,15 @@ MQTT_TOPIC = "robot/tof_map"  # Publish the map data here
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)  # Update to use VERSION2 callbacks
 client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
 client.loop_start()
+
+# -----------------------------------------------------------------------------
+# Sensor Data Cache
+# -----------------------------------------------------------------------------
+sensor_data_cache = {
+    0: None,  # Most recent valid data from sensor 0
+    1: None,  # Most recent valid data from sensor 1
+    2: None,  # Most recent valid data from sensor 2
+}
 
 # -----------------------------------------------------------------------------
 # ToF Sensor Setup
@@ -175,6 +186,74 @@ def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
     return points_np
 
 # -----------------------------------------------------------------------------
+# Occupancy Grid Parameters
+# -----------------------------------------------------------------------------
+GRID_MIN_X = -2.0  # meters
+GRID_MAX_X = 2.0
+GRID_MIN_Y = -2.0
+GRID_MAX_Y = 2.0
+GRID_RESOLUTION = 0.05  # 5cm per cell
+OBSTACLE_HEIGHT_THRESHOLD = 0.1  # meters above ground
+ROBOT_RADIUS = 0.2  # 200mm radius
+
+def create_empty_grid() -> np.ndarray:
+    """Create an empty occupancy grid."""
+    grid_size_x = int((GRID_MAX_X - GRID_MIN_X) / GRID_RESOLUTION)
+    grid_size_y = int((GRID_MAX_Y - GRID_MIN_Y) / GRID_RESOLUTION)
+    return np.ones((grid_size_y, grid_size_x), dtype=np.uint8)  # 1 is free space
+
+def world_to_grid(x: float, y: float) -> tuple[int, int]:
+    """Convert world coordinates to grid coordinates."""
+    grid_x = int((x - GRID_MIN_X) / GRID_RESOLUTION)
+    grid_y = int((y - GRID_MIN_Y) / GRID_RESOLUTION)
+    return grid_x, grid_y
+
+def update_occupancy_grid(sensor_data: List[Dict]) -> np.ndarray:
+    """Create occupancy grid from sensor data with robot size consideration."""
+    grid = create_empty_grid()
+    
+    # First pass: Mark direct obstacle detections
+    for sensor in sensor_data:
+        for point in sensor["valid_points"]:
+            x, y, z = point
+            # Skip points outside our grid bounds
+            if (GRID_MIN_X <= x <= GRID_MAX_X and 
+                GRID_MIN_Y <= y <= GRID_MAX_Y):
+                # If point is above our height threshold, mark as occupied
+                if z > OBSTACLE_HEIGHT_THRESHOLD:
+                    grid_x, grid_y = world_to_grid(x, y)
+                    try:
+                        grid[grid_y, grid_x] = 0  # 0 is occupied space
+                    except IndexError:
+                        continue
+    
+    # Second pass: Dilate obstacles by robot radius
+    dilated_grid = grid.copy()
+    robot_cells = int(ROBOT_RADIUS / GRID_RESOLUTION)  # Number of cells for robot radius
+    
+    # Find all obstacle cells
+    obstacle_ys, obstacle_xs = np.where(grid == 0)
+    
+    # For each obstacle cell, mark surrounding cells within robot radius as occupied
+    for obs_y, obs_x in zip(obstacle_ys, obstacle_xs):
+        # Calculate bounds for the square region to check
+        y_min = max(0, obs_y - robot_cells)
+        y_max = min(grid.shape[0], obs_y + robot_cells + 1)
+        x_min = max(0, obs_x - robot_cells)
+        x_max = min(grid.shape[1], obs_x + robot_cells + 1)
+        
+        # Check each cell in the square region
+        for y in range(y_min, y_max):
+            for x in range(x_min, x_max):
+                # Calculate distance to obstacle cell
+                dist = np.sqrt((y - obs_y)**2 + (x - obs_x)**2) * GRID_RESOLUTION
+                # If within robot radius, mark as occupied
+                if dist <= ROBOT_RADIUS:
+                    dilated_grid[y, x] = 0
+
+    return dilated_grid
+
+# -----------------------------------------------------------------------------
 # Main Loop
 # -----------------------------------------------------------------------------
 print("Starting ToF read + MQTT publish loop...")
@@ -183,38 +262,81 @@ try:
         all_sensor_data = []
 
         for s_idx, sensor in enumerate(sensors):
-            if sensor.check_data_ready():
-                data = sensor.get_ranging_data()
+            try:
+                if sensor.check_data_ready():
+                    data = sensor.get_ranging_data()
 
-                # Get the right slice for distance readings
-                distances_mm = data.distance_mm[:NUM_ZONES]
-                target_status = data.target_status[:NUM_ZONES]
+                    # Ensure we have enough data before slicing
+                    if len(data.distance_mm) >= NUM_ZONES and len(data.target_status) >= NUM_ZONES:
+                        distances_mm = data.distance_mm[:NUM_ZONES]
+                        target_status = data.target_status[:NUM_ZONES]
 
-                # Convert to 3D points in world coordinates
-                points_3d = get_3d_points(distances_mm, s_idx)
+                        # Convert to 3D points in world coordinates
+                        points_3d = get_3d_points(distances_mm, s_idx)
 
-                # Build a data structure for this sensor
-                # We'll also separate valid vs invalid points if you want
-                valid_points = []
-                invalid_points = []
-                for i, (dist_mm, status) in enumerate(zip(distances_mm, target_status)):
-                    # Status code 5 typically means "valid" measurement on VL53L5CX
-                    if status == 5 and dist_mm != 0:
-                        valid_points.append(points_3d[i].tolist())
+                        # Build a data structure for this sensor
+                        # We'll also separate valid vs invalid points if you want
+                        valid_points = []
+                        invalid_points = []
+                        for i, (dist_mm, status) in enumerate(zip(distances_mm, target_status)):
+                            # Status code 5 typically means "valid" measurement on VL53L5CX
+                            if status == 5 and dist_mm != 0:
+                                valid_points.append(points_3d[i].tolist())
+                            else:
+                                invalid_points.append(points_3d[i].tolist())
+
+                        sensor_data = {
+                            "sensor_address": hex(sensor.i2c_address),
+                            "sensor_index": s_idx,
+                            "valid_points": valid_points,
+                            "invalid_points": invalid_points,
+                        }
+                        all_sensor_data.append(sensor_data)
                     else:
-                        invalid_points.append(points_3d[i].tolist())
+                        print(f"Warning: Sensor {s_idx} returned incomplete data")
+                        continue
 
-                sensor_data = {
-                    "sensor_address": hex(sensor.i2c_address),
-                    "sensor_index": s_idx,
-                    "valid_points": valid_points,
-                    "invalid_points": invalid_points,
-                }
-                all_sensor_data.append(sensor_data)
+            except IndexError as e:
+                print(f"Error reading sensor {s_idx}: {e}")
+                continue
+            except Exception as e:
+                print(f"Unexpected error with sensor {s_idx}: {e}")
+                continue
 
         # Publish all sensor data to MQTT as one JSON structure
         if all_sensor_data:
-            payload = json.dumps({"sensors": all_sensor_data})
+            # Update cache with new sensor data
+            for sensor_data in all_sensor_data:
+                s_idx = sensor_data["sensor_index"]
+                if sensor_data["valid_points"]:  # Only cache if we have valid points
+                    sensor_data_cache[s_idx] = sensor_data
+
+            # Combine all cached sensor data
+            combined_sensor_data = [
+                data for data in sensor_data_cache.values() 
+                if data is not None
+            ]
+
+            # Create occupancy grid from combined data
+            occupancy_grid = update_occupancy_grid(combined_sensor_data)
+            
+            # Convert numpy array to list for JSON serialization
+            grid_list = occupancy_grid.tolist()
+            
+            # Add grid to payload
+            payload = json.dumps({
+                "sensors": combined_sensor_data,  # Send all cached sensor data
+                "occupancy_grid": {
+                    "data": grid_list,
+                    "height": len(grid_list),      # Add height
+                    "width": len(grid_list[0]),    # Add width
+                    "resolution": GRID_RESOLUTION,
+                    "min_x": GRID_MIN_X,
+                    "max_x": GRID_MAX_X,
+                    "min_y": GRID_MIN_Y,
+                    "max_y": GRID_MAX_Y
+                }
+            })
             client.publish(MQTT_TOPIC, payload)
 
         time.sleep(0.05)

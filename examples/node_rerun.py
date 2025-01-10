@@ -23,7 +23,8 @@ rr.connect_tcp("192.168.2.24:9876")       # Connect to Rerun Viewer over TCP
 # -----------------------------------------------------------------------------
 MQTT_BROKER = "localhost"    
 MQTT_PORT = 1883
-MQTT_TOPIC = "robot/tof_map"  # Subscribe to the map data topic
+MQTT_TOPIC = "robot/tof_map"         # Subscribe to the map data topic
+PATH_PLAN_TOPIC = "robot/local_path"  # Subscribe to the path plan topic
 
 # -----------------------------------------------------------------------------
 # Color Mapping Setup
@@ -53,40 +54,89 @@ rr.log(
 # -----------------------------------------------------------------------------
 def on_connect(client, userdata, flags, reason_code, properties):
     print(f"Connected with reason code: {reason_code}")
-    client.subscribe(MQTT_TOPIC)
+    client.subscribe([
+        (MQTT_TOPIC, 0),
+        (PATH_PLAN_TOPIC, 0),
+    ])
 
 def on_message(client, userdata, msg):
     try:
-        data = json.loads(msg.payload)
-        
-        # Process each sensor's data
-        for sensor_data in data["sensors"]:
-            sensor_addr = sensor_data["sensor_address"]
+        if msg.topic == MQTT_TOPIC:
+            data = json.loads(msg.payload)
             
-            # Process valid points
-            valid_points = sensor_data["valid_points"]
-            if valid_points:
-                points_np = np.array(valid_points)
-                d_m = np.linalg.norm(points_np, axis=1)  # distances in meters
-                colors = cmap(norm(d_m))
-                radii = np.full(points_np.shape[0], 0.05)
+            # Process each sensor's data
+            for sensor_data in data["sensors"]:
+                sensor_addr = sensor_data["sensor_address"]
                 
-                rr.log(
-                    f"world/tof/sensor_{sensor_addr}/valid",
-                    rr.Points3D(points_np, colors=colors, radii=radii)
-                )
+                # Process valid points
+                valid_points = sensor_data["valid_points"]
+                if valid_points:
+                    points_np = np.array(valid_points)
+                    d_m = np.linalg.norm(points_np, axis=1)  # distances in meters
+                    colors = cmap(norm(d_m))
+                    radii = np.full(points_np.shape[0], 0.05)
+                    
+                    rr.log(
+                        f"world/tof/sensor_{sensor_addr}/valid",
+                        rr.Points3D(points_np, colors=colors, radii=radii)
+                    )
+                
+                # Process invalid points
+                invalid_points = sensor_data["invalid_points"]
+                if invalid_points:
+                    points_np = np.array(invalid_points)
+                    colors = np.full((points_np.shape[0], 4), [1.0, 1.0, 0.0, 0.5])  # Yellow, semi-transparent
+                    radii = np.full(points_np.shape[0], 0.05)
+                    
+                    rr.log(
+                        f"world/tof/sensor_{sensor_addr}/invalid",
+                        rr.Points3D(points_np, colors=colors, radii=radii)
+                    )
+
+            # Add occupancy grid visualization
+            if "occupancy_grid" in data:
+                grid_info = data["occupancy_grid"]
+                grid = np.array(grid_info["data"])
+                resolution = grid_info["resolution"]
+                min_x = grid_info["min_x"]
+                min_y = grid_info["min_y"]
+                
+                # Create points for occupied cells (where grid == 0)
+                occupied_y, occupied_x = np.where(grid == 0)
+                
+                if len(occupied_x) > 0:
+                    # Convert grid coordinates to world coordinates
+                    world_x = occupied_x * resolution + min_x + (resolution / 2)
+                    world_y = occupied_y * resolution + min_y + (resolution / 2)
+                    world_z = np.full_like(world_x, 0.1)  # Points at 0.1m height
+                    
+                    points = np.column_stack((world_x, world_y, world_z))
+                    colors = np.full((len(points), 4), [0.2, 0.2, 0.2, 1.0])  # Dark gray, fully opaque
+                    radii = np.full(len(points), resolution / 2)  # Half the cell size
+                    
+                    rr.log(
+                        "world/occupancy_grid",
+                        rr.Points3D(points, colors=colors, radii=radii)
+                    )
+        elif msg.topic == PATH_PLAN_TOPIC:
+            # Parse the path plan message
+            path_data = json.loads(msg.payload)
+            path_xy = path_data["path_xy"]  # Get world coordinates
+
+            # Convert path to numpy array for visualization
+            path_points = np.array([[x, y, 0.1] for x, y in path_xy])  # Set Z to 0.1m
             
-            # Process invalid points
-            invalid_points = sensor_data["invalid_points"]
-            if invalid_points:
-                points_np = np.array(invalid_points)
-                colors = np.full((points_np.shape[0], 4), [1.0, 1.0, 0.0, 0.5])  # Yellow, semi-transparent
-                radii = np.full(points_np.shape[0], 0.05)
-                
+            # Create line segments between consecutive points
+            if len(path_points) > 1:
                 rr.log(
-                    f"world/tof/sensor_{sensor_addr}/invalid",
-                    rr.Points3D(points_np, colors=colors, radii=radii)
+                    "world/path_plan",
+                    rr.LineStrips3D(
+                        [path_points],  # Wrap path_points in a list to create a single continuous strip
+                        colors=[[0.0, 1.0, 0.0, 1.0]],  # Green path
+                        radii=[0.02]  # Line thickness
+                    )
                 )
+                print(f"Visualized path with {len(path_points)} points")
 
     except Exception as e:
         print(f"Error processing message: {e}")
