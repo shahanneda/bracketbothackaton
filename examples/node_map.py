@@ -135,10 +135,9 @@ def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
     """
     Convert the distance readings into (x, y, z) points in world coordinates.
     sensor_index: 0 => sensor facing +60 deg, 1 => forward, 2 => -60 deg
-        (Adjust these if your physical setup is different.)
     """
     # Adjust if you want to vary the sensor's mounting height:
-    sensor_height_m = 0.4  # Example: 0.4m from ground
+    sensor_height_m = 0.85
 
     points = []
     grid_size = int(math.sqrt(NUM_ZONES))  # 8 or 4
@@ -163,25 +162,38 @@ def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
 
     points_np = np.array(points)
 
-    # Rotate points to account for sensor orientation:
-    #   sensor_index 0 => rotated +60 deg
-    #   sensor_index 2 => rotated -60 deg
-    #   sensor_index 1 => no rotation (forward)
     if points_np.size > 0:
+        # First rotation: Around Z-axis for sensor orientation
         if sensor_index == 0:
-            angle = deg2rad(60.0)
+            z_angle = deg2rad(60.0)
         elif sensor_index == 2:
-            angle = deg2rad(-60.0)
+            z_angle = deg2rad(-60.0)
         else:
-            angle = 0.0
+            z_angle = 0.0
 
-        if angle != 0.0:
-            rot_z = np.array([
-                [ math.cos(angle), -math.sin(angle), 0 ],
-                [ math.sin(angle),  math.cos(angle), 0 ],
-                [ 0,               0,                1 ],
-            ])
-            points_np = points_np @ rot_z.T
+        # Tilt angle around local Y-axis
+        tilt_angle = deg2rad(30.0)  # Negative for downward tilt
+
+        # Create rotation matrices
+        # Rotation around Z-axis
+        rot_z = np.array([
+            [math.cos(z_angle), -math.sin(z_angle), 0],
+            [math.sin(z_angle),  math.cos(z_angle), 0],
+            [0,                 0,                 1],
+        ])
+
+        # Rotation around Y-axis (local to sensor after Z rotation)
+        rot_y = np.array([
+            [ math.cos(tilt_angle), 0, math.sin(tilt_angle)],
+            [ 0,                    1, 0                  ],
+            [-math.sin(tilt_angle), 0, math.cos(tilt_angle)],
+        ])
+
+        # Combined rotation: apply Z rotation first, then Y rotation
+        rot_total = rot_z @ rot_y
+
+        # Apply total rotation
+        points_np = points_np @ rot_total.T
 
     return points_np
 
