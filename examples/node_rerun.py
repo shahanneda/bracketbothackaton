@@ -12,6 +12,9 @@ import paho.mqtt.client as mqtt
 import matplotlib
 import rerun as rr
 
+# Import math for trigonometric functions
+import math
+
 # -----------------------------------------------------------------------------
 # Rerun Setup
 # -----------------------------------------------------------------------------
@@ -21,10 +24,11 @@ rr.connect_tcp("192.168.2.24:9876")       # Connect to Rerun Viewer over TCP
 # -----------------------------------------------------------------------------
 # MQTT Setup
 # -----------------------------------------------------------------------------
-MQTT_BROKER = "localhost"    
+MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "robot/tof_map"         # Subscribe to the map data topic
 PATH_PLAN_TOPIC = "robot/local_path"  # Subscribe to the path plan topic
+ODOMETRY_TOPIC = "robot/odometry"     # Subscribe to the odometry data
 
 # -----------------------------------------------------------------------------
 # Color Mapping Setup
@@ -35,28 +39,18 @@ norm = matplotlib.colors.Normalize(vmin=0.0, vmax=4.0)  # 0–4 meters color ran
 # -----------------------------------------------------------------------------
 # Logging a Simple Robot Box (Timeless)
 # -----------------------------------------------------------------------------
-robot_center    = np.array([[0.0, 0.0, 0.9]])     # (x=0, y=0, z=0.9)
 robot_half_size = np.array([[0.04, 0.04, 0.9]])   # half extents in x,y,z
 robot_color     = np.array([[1.0, 0.0, 0.0, 0.4]])# RGBA: red, semi-transparent
-
-rr.log(
-    "world/robot",
-    rr.Boxes3D(
-        centers=robot_center,
-        half_sizes=robot_half_size,
-        colors=robot_color
-    ),
-    timeless=True,
-)
 
 # -----------------------------------------------------------------------------
 # MQTT Callbacks
 # -----------------------------------------------------------------------------
-def on_connect(client, userdata, flags, reason_code, properties):
+def on_connect(client, userdata, flags, reason_code, properties=None):
     print(f"Connected with reason code: {reason_code}")
     client.subscribe([
         (MQTT_TOPIC, 0),
         (PATH_PLAN_TOPIC, 0),
+        (ODOMETRY_TOPIC, 0),  # Subscribe to the odometry topic
     ])
 
 def on_message(client, userdata, msg):
@@ -138,6 +132,35 @@ def on_message(client, userdata, msg):
                 )
                 print(f"Visualized path with {len(path_points)} points")
 
+        elif msg.topic == ODOMETRY_TOPIC:
+            # Process odometry data
+            odom_data = json.loads(msg.payload)
+            x = odom_data['x']
+            y = odom_data['y']
+            theta = odom_data['theta']
+
+            # Update the robot's position in Rerun
+            robot_center = np.array([[x, y, 0.45]])  # Update robot's center position
+
+            # Convert theta (yaw) to quaternion
+            # Quaternion representing rotation around Z-axis by angle theta
+            sin_theta_half = math.sin(theta / 2.0)
+            cos_theta_half = math.cos(theta / 2.0)
+            quat = rr.Quaternion(xyzw=[0.0, 0.0, sin_theta_half, cos_theta_half])
+
+            # Log the robot's position and orientation
+            rr.log(
+                "world/robot",
+                rr.Boxes3D(
+                    centers=robot_center,
+                    half_sizes=robot_half_size,
+                    quaternions=[quat],
+                    colors=robot_color
+                ),
+                timeless=False,  # Allow the robot's state to update over time
+            )
+            print(f"Updated robot position: x={x}, y={y}, theta={theta}")
+
     except Exception as e:
         print(f"Error processing message: {e}")
 
@@ -153,7 +176,7 @@ def main():
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         print("Starting MQTT loop...")
         client.loop_forever()
-        
+
     except KeyboardInterrupt:
         print("\nInterrupted by user")
     finally:

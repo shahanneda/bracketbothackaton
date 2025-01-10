@@ -98,7 +98,7 @@ def main():
     prev_left_turns = motor_controller.get_position_turns_left()
     prev_right_turns = motor_controller.get_position_turns_right()
 
-    rate = 10  # Hz
+    rate = 50  # Hz
     dt = 1.0 / rate
 
     print("[node_odometry.py] Starting odometry node.")
