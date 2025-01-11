@@ -39,7 +39,7 @@ norm = matplotlib.colors.Normalize(vmin=0.0, vmax=4.0)  # 0–4 meters color ran
 # -----------------------------------------------------------------------------
 # Logging a Simple Robot Box (Timeless)
 # -----------------------------------------------------------------------------
-robot_half_size = np.array([[0.04, 0.04, 0.9]])   # half extents in x,y,z
+robot_half_size = np.array([[0.02, 0.02, 0.7]])   # half extents in x,y,z
 robot_color     = np.array([[1.0, 0.0, 0.0, 0.4]])# RGBA: red, semi-transparent
 
 # -----------------------------------------------------------------------------
@@ -75,9 +75,11 @@ def on_message(client, userdata, msg):
                     colors = cmap(norm(d_m))
                     radii = np.full(points_np.shape[0], 0.05)
                     
+                    # Log the points relative to the 'robot' frame
                     rr.log(
-                        f"world/tof/sensor_{sensor_addr}/valid",
-                        rr.Points3D(points_np, colors=colors, radii=radii)
+                        f"robot/tof/sensor_{sensor_addr}/valid",
+                        rr.Points3D(points_np, colors=colors, radii=radii),
+                        timeless=False,
                     )
                 
                 # Process invalid points
@@ -87,9 +89,11 @@ def on_message(client, userdata, msg):
                     colors = np.full((points_np.shape[0], 4), [1.0, 1.0, 0.0, 0.5])  # Yellow, semi-transparent
                     radii = np.full(points_np.shape[0], 0.05)
                     
+                    # Log the points relative to the 'robot' frame
                     rr.log(
-                        f"world/tof/sensor_{sensor_addr}/invalid",
-                        rr.Points3D(points_np, colors=colors, radii=radii)
+                        f"robot/tof/sensor_{sensor_addr}/invalid",
+                        rr.Points3D(points_np, colors=colors, radii=radii),
+                        timeless=False,
                     )
 
             # Add occupancy grid visualization
@@ -104,83 +108,105 @@ def on_message(client, userdata, msg):
                 occupied_y, occupied_x = np.where(grid == 0)
                 
                 if len(occupied_x) > 0:
-                    # Convert grid coordinates to world coordinates
-                    world_x = occupied_x * resolution + min_x + (resolution / 2)
-                    world_y = occupied_y * resolution + min_y + (resolution / 2)
-                    world_z = np.full_like(world_x, 0.1)  # Points at 0.1m height
+                    # Convert grid coordinates to local coordinates
+                    local_x = occupied_x * resolution + min_x + (resolution / 2)
+                    local_y = occupied_y * resolution + min_y + (resolution / 2)
+                    local_z = np.full_like(local_x, 0.1)  # Points at 0.1m height
                     
-                    points = np.column_stack((world_x, world_y, world_z))
+                    points = np.column_stack((local_x, local_y, local_z))
                     colors = np.full((len(points), 4), [0.2, 0.2, 0.2, 1.0])  # Dark gray, fully opaque
                     radii = np.full(len(points), resolution / 2)  # Half the cell size
                     
+                    # Log the occupancy grid relative to the 'robot' frame
                     rr.log(
-                        "world/occupancy_grid",
-                        rr.Points3D(points, colors=colors, radii=radii)
+                        "robot/occupancy_grid",
+                        rr.Points3D(points, colors=colors, radii=radii),
+                        timeless=False,
                     )
         elif msg.topic == PATH_PLAN_TOPIC:
             # Parse the path plan message
             path_data = json.loads(msg.payload)
-            path_xy = path_data["path_xy"]  # Get world coordinates
-
+            path_xy = path_data["path_xy"]  # Get path coordinates relative to the robot
+    
             # Convert path to numpy array for visualization
             path_points = np.array([[x, y, 0.1] for x, y in path_xy])  # Set Z to 0.1m
             
-            # Create line segments between consecutive points
+            # Log the path plan relative to the 'robot' frame
             if len(path_points) > 1:
                 rr.log(
-                    "world/path_plan",
+                    "robot/path_plan",
                     rr.LineStrips3D(
-                        [path_points],  # Wrap path_points in a list to create a single continuous strip
+                        [path_points],
                         colors=[[0.0, 1.0, 0.0, 1.0]],  # Green path
-                        radii=[0.02]  # Line thickness
-                    )
+                        radii=[0.02]
+                    ),
+                    timeless=False,
                 )
                 print(f"Visualized path with {len(path_points)} points")
-
+    
         elif msg.topic == ODOMETRY_TOPIC:
             # Process odometry data
             odom_data = json.loads(msg.payload)
             x = odom_data['x']
             y = odom_data['y']
             theta = odom_data['theta']
-
-            # Update the robot's position in Rerun
-            robot_center = np.array([[x, y, 0.9]])  # Update robot's center position
-
-            # Convert theta (yaw) to quaternion
-            # Quaternion representing rotation around Z-axis by angle theta
+    
+            # Update the robot's transform in Rerun
             sin_theta_half = math.sin(theta / 2.0)
             cos_theta_half = math.cos(theta / 2.0)
             quat = rr.Quaternion(xyzw=[0.0, 0.0, sin_theta_half, cos_theta_half])
-
-            # Log the robot's position and orientation
+    
+            # Log the transform from 'world' to 'robot'
             rr.log(
-                "world/robot",
+                "robot",
+                rr.Transform3D(
+                    translation=[x, y, 0.0],
+                    rotation=quat,
+                ),
+                timeless=False,
+            )
+    
+            # Log the robot's visualization (optional)
+            robot_center = np.array([[0.0, 0.0, 0.7]])  # Robot is at the origin of its own frame
+    
+            # Log the box shape
+            rr.log(
+                "robot/geometry/extrusion",
                 rr.Boxes3D(
                     centers=robot_center,
                     half_sizes=robot_half_size,
-                    quaternions=[quat],
                     colors=robot_color
                 ),
-                timeless=False,  # Allow the robot's state to update over time
+                timeless=False,
             )
-            print(f"Updated robot position: x={x}, y={y}, theta={theta}")
-
-            # Append the current position to the robot path
+            
+            # Add capsule base
+            rr.log(
+                "robot/geometry/base",
+                rr.Boxes3D(
+                    centers=[[0.0, 0.0, 0.0825]],  # Center at base
+                    half_sizes=[[0.25, 0.25, 0.075]],  # Half width/length 0.5/2 = 0.25m, height 0.15/2 = 0.075m
+                    colors=robot_color
+                ),
+                timeless=False,
+            )
+            print(f"Updated robot position: x={x:.2f}, y={y:.2f}, theta={theta:.2f}")
+    
+            # Append the current position to the robot path (in world frame)
             robot_path.append([x, y, 0.05])  # Z-coordinate is consistent with robot_center
-
-            # Log the robot's path as a LineStrips3D
+    
+            # Log the robot's path as a LineStrips3D in world frame
             if len(robot_path) > 1:
                 rr.log(
                     "world/robot_path",
                     rr.LineStrips3D(
-                        [np.array(robot_path)],  # Wrap in a list to create a single strip
+                        [np.array(robot_path)],
                         colors=[[0.0, 0.0, 1.0, 1.0]],  # Blue color for the path
-                        radii=0.01  # Thickness of the line
+                        radii=0.01
                     ),
                     timeless=False,
                 )
-
+    
     except Exception as e:
         print(f"Error processing message: {e}")
 

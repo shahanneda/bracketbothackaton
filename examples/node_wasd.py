@@ -33,7 +33,6 @@ def press(key):
 
 def release(key):
     # Stop motors when key is released
-    print("Stopping motors")
     client.publish(MQTT_TOPIC, "stop")
 
 try:
