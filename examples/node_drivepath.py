@@ -22,30 +22,34 @@ MAX_ANGULAR_SPEED = 1.0   # rad/s
 K_LINEAR = 0.5
 K_ANGULAR = 1.5
 
+# State thresholds
+ANGLE_THRESHOLD = 0.1   # radians (~5.7 degrees)
+DISTANCE_THRESHOLD = 0.1  # meters
+
 # Global variables
-path_xy = []       # List of (x, y) waypoints
-current_index = 0  # Index of current waypoint
+path_xy = []        # List of (x, y) waypoints
+current_index = 0   # Index of current waypoint
 
-robot_x = 0.0      # Robot's current x position
-robot_y = 0.0      # Robot's current y position
-robot_th = 0.0     # Robot's current heading in radians
+robot_x = 0.0       # Robot's current x position
+robot_y = 0.0       # Robot's current y position
+robot_th = 0.0      # Robot's current heading in radians
 
-# Flags
-new_path_received = False
+# State variable
+state = 'ROTATING'  # Initial state
 
 def on_path_message(client, userdata, msg):
     """
     Callback for receiving new paths.
     """
-    global path_xy, current_index, new_path_received
+    global path_xy, current_index, state
     payload = msg.payload.decode()
     data = json.loads(payload)
     new_path_xy = data.get('path_xy', [])
 
     path_xy = new_path_xy
     current_index = 0   # Reset current index
-    new_path_received = True
-    print("[node_follow_path.py] Updated path with {} waypoints.".format(len(path_xy)))
+    state = 'ROTATING'  # Start with rotating to first waypoint
+    print("[node_drivepath.py] Updated path with {} waypoints.".format(len(path_xy)))
 
 def on_odometry_message(client, userdata, msg):
     """
@@ -68,7 +72,7 @@ def on_message(client, userdata, msg):
         on_odometry_message(client, userdata, msg)
 
 def main():
-    global path_xy, current_index, new_path_received
+    global path_xy, current_index, state
     global robot_x, robot_y, robot_th
 
     # Initialize MQTT client
@@ -79,11 +83,11 @@ def main():
     # Subscribe to path and odometry topics
     client.subscribe(MQTT_TOPIC_PATH_PLAN)
     client.subscribe(MQTT_TOPIC_ODOMETRY)
-    print("[node_follow_path.py] Subscribed to topics.")
+    print("[node_drivepath.py] Subscribed to topics.")
 
     client.loop_start()
 
-    print("[node_follow_path.py] Started path follower.")
+    print("[node_drivepath.py] Started path follower.")
 
     try:
         while True:
@@ -109,56 +113,86 @@ def main():
                 # Normalize angle_error to [-pi, pi]
                 angle_error = (angle_error + math.pi) % (2 * math.pi) - math.pi
 
-                # Compute control signals
-                linear_velocity = K_LINEAR * distance
-                angular_velocity = K_ANGULAR * angle_error
+                if state == 'ROTATING':
+                    # Rotate in place to face the waypoint
+                    angular_velocity = K_ANGULAR * angle_error
 
-                # Limit velocities to maximum values
-                linear_velocity = max(-MAX_LINEAR_SPEED, min(MAX_LINEAR_SPEED, linear_velocity))
-                angular_velocity = max(-MAX_ANGULAR_SPEED, min(MAX_ANGULAR_SPEED, angular_velocity))
+                    # Limit angular velocity
+                    angular_velocity = max(-MAX_ANGULAR_SPEED, min(MAX_ANGULAR_SPEED, angular_velocity))
 
-                # Send velocity commands
-                cmd_msg = {
-                    'linear_velocity': linear_velocity,
-                    'angular_velocity': angular_velocity
-                }
-                client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
+                    # Set linear velocity to zero
+                    linear_velocity = 0.0
 
-                print(f"[node_follow_path.py] Published velocities: linear {linear_velocity:.2f}, angular {angular_velocity:.2f}")
+                    # Send velocity commands
+                    cmd_msg = {
+                        'linear_velocity': linear_velocity,
+                        'angular_velocity': angular_velocity
+                    }
+                    client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
 
-                # Check if we have reached the waypoint
-                if distance < 0.1:  # Threshold to consider waypoint reached
-                    print(f"[node_follow_path.py] Reached waypoint {current_index}: ({goal_x:.2f}, {goal_y:.2f})")
-                    current_index += 1
+                    print(f"[node_drivepath.py] ROTATING: angle_error {angle_error:.2f} rad, angular_velocity {angular_velocity:.2f} rad/s")
 
-                    # If we've reached the last waypoint, publish path completion
-                    if current_index >= len(path_xy):
-                        print("[node_follow_path.py] Path completed. Notifying path planning node.")
-                        # Publish to the path completed topic
-                        client.publish(MQTT_TOPIC_PATH_COMPLETED, json.dumps({'status': 'completed'}))
-                        # Reset path variables
-                        path_xy = []
-                        current_index = 0
+                    # Check if the robot is facing the waypoint within the threshold
+                    if abs(angle_error) < ANGLE_THRESHOLD:
+                        print("[node_drivepath.py] Rotation aligned. Switching to DRIVING state.")
+                        state = 'DRIVING'
 
-            else:
-                if new_path_received:
-                    # We have a new path but have already reached the end
-                    print("[node_follow_path.py] Waiting for new path...")
-                    new_path_received = False
+                elif state == 'DRIVING':
+                    # Drive forward to the waypoint
+                    linear_velocity = K_LINEAR * distance
+                    linear_velocity = min(MAX_LINEAR_SPEED, linear_velocity)
+
+                    # Optionally make small angular corrections
+                    angular_velocity = K_ANGULAR * angle_error
+                    # Limit angular velocity during driving
+                    MAX_DRIVING_ANGULAR_SPEED = 0.5  # rad/s
+                    angular_velocity = max(-MAX_DRIVING_ANGULAR_SPEED, min(MAX_DRIVING_ANGULAR_SPEED, angular_velocity))
+
+                    # Send velocity commands
+                    cmd_msg = {
+                        'linear_velocity': linear_velocity,
+                        'angular_velocity': angular_velocity
+                    }
+                    client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
+
+                    print(f"[node_drivepath.py] DRIVING: distance {distance:.2f} m, linear_velocity {linear_velocity:.2f} m/s, angular_velocity {angular_velocity:.2f} rad/s")
+
+                    # Check if we have reached the waypoint
+                    if distance < DISTANCE_THRESHOLD:
+                        print(f"[node_drivepath.py] Reached waypoint {current_index}: ({goal_x:.2f}, {goal_y:.2f})")
+                        current_index += 1
+                        if current_index < len(path_xy):
+                            state = 'ROTATING'  # Rotate to face the next waypoint
+                        else:
+                            # Path completed
+                            print("[node_drivepath.py] Path completed. Notifying path planning node.")
+                            # Publish to the path completed topic
+                            client.publish(MQTT_TOPIC_PATH_COMPLETED, json.dumps({'status': 'completed'}))
+                            # Reset path variables
+                            path_xy = []
+                            current_index = 0
+                            state = 'IDLE'  # No active path
+
                 else:
-                    # No path or path completed
-                    # Send stop command
+                    # State is 'IDLE', send stop command
                     cmd_msg = {
                         'linear_velocity': 0.0,
                         'angular_velocity': 0.0
                     }
                     client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
-                    # Wait a bit
-                    time.sleep(0.1)
+                    print("[node_drivepath.py] IDLE: No path to follow.")
+            else:
+                # No path or path completed
+                # Send stop command
+                cmd_msg = {
+                    'linear_velocity': 0.0,
+                    'angular_velocity': 0.0
+                }
+                client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
+                time.sleep(0.1)
 
-        # Continue looping and processing commands
     except KeyboardInterrupt:
-        print("\n[node_follow_path.py] Interrupted by user.")
+        print("\n[node_drivepath.py] Interrupted by user.")
     finally:
         # Send stop command on exit
         cmd_msg = {
@@ -168,7 +202,7 @@ def main():
         client.publish(MQTT_TOPIC_DRIVE_CMD, json.dumps(cmd_msg))
         client.loop_stop()
         client.disconnect()
-        print("[node_follow_path.py] Shutdown complete.")
+        print("[node_drivepath.py] Shutdown complete.")
 
 if __name__ == "__main__":
     main()
