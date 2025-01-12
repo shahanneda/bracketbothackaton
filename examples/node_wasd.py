@@ -40,9 +40,9 @@ try:
     listen_keyboard(
         on_press=press,
         on_release=release,
-        delay_second_char=0.1,
-        delay_other_chars=0.01,
-        sequential=True,
+        # delay_second_char=0.1,
+        # delay_other_chars=0.01,
+        # sequential=True,
     )
 
 except Exception as e:
