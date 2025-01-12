@@ -26,7 +26,7 @@ from pi5neo import Pi5Neo
 
 dotenv.load_dotenv()
 
-def set_alsa_volume(volume=75):
+def set_alsa_volume(volume=85):
     try:
         cards = alsaaudio.cards()
         card_num = None
