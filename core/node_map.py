@@ -134,10 +134,10 @@ def deg2rad(deg: float) -> float:
 def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
     """
     Convert the distance readings into (x, y, z) points in world coordinates.
-    sensor_index: 0 => sensor facing +60 deg, 1 => forward, 2 => -60 deg
+    Applies a fixed offset towards the center of the robot to correct Z-axis discrepancies.
     """
-    # Adjust if you want to vary the sensor's mounting height:
     sensor_height_m = 0.75
+    OFFSET_TOWARDS_CENTER = -0.5  # Adjust this value as needed (in meters)
 
     points = []
     grid_size = int(math.sqrt(NUM_ZONES))  # 8 or 4
@@ -154,7 +154,11 @@ def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
         x = dist_m * math.cos(vert_rad) * math.cos(horiz_rad)
         y = dist_m * math.cos(vert_rad) * math.sin(horiz_rad)
         z = dist_m * math.sin(vert_rad)
-        
+
+        # Apply fixed offset towards the center of the robot
+        x += OFFSET_TOWARDS_CENTER * math.cos(deg2rad(sensor_index * 60))
+        y += OFFSET_TOWARDS_CENTER * math.sin(deg2rad(sensor_index * 60))
+
         # Shift for sensor height
         z += sensor_height_m
 
@@ -167,38 +171,28 @@ def get_3d_points(distances_mm: list[int], sensor_index: int) -> np.ndarray:
         if sensor_index == 0:
             z_angle = -60.0   # Left sensor
         elif sensor_index == 2:
-            z_angle = 60.0  # Right sensor
+            z_angle = 60.0    # Right sensor
         else:
-            z_angle = 0.0    # Forward sensor
+            z_angle = 0.0     # Forward sensor
 
         # Tilt angle for sensors
         tilt_angle = -30.0
 
-        if sensor_index != 1:  # Side sensors
-            # First rotate around Y axis in sensor's local frame for tilt
-            rot_y = np.array([
-                [ math.cos(deg2rad(tilt_angle)), 0, math.sin(deg2rad(tilt_angle))],
-                [ 0,                             1, 0                            ],
-                [-math.sin(deg2rad(tilt_angle)), 0, math.cos(deg2rad(tilt_angle))],
-            ])
+        # Rotation matrices
+        rot_y = np.array([
+            [ math.cos(deg2rad(tilt_angle)), 0, math.sin(deg2rad(tilt_angle))],
+            [ 0,                             1, 0                            ],
+            [-math.sin(deg2rad(tilt_angle)), 0, math.cos(deg2rad(tilt_angle))],
+        ])
 
-            # Then rotate around Z axis to align with global frame
-            rot_z = np.array([
-                [math.cos(deg2rad(z_angle)), -math.sin(deg2rad(z_angle)), 0],
-                [math.sin(deg2rad(z_angle)),  math.cos(deg2rad(z_angle)), 0],
-                [0,                          0,                           1],
-            ])
+        rot_z = np.array([
+            [math.cos(deg2rad(z_angle)), -math.sin(deg2rad(z_angle)), 0],
+            [math.sin(deg2rad(z_angle)),  math.cos(deg2rad(z_angle)), 0],
+            [0,                          0,                           1],
+        ])
 
-            # Apply rotations: first tilt, then orientation
-            points_np = points_np @ rot_y @ rot_z
-        else:  # Forward sensor
-            # Only tilt around Y axis
-            rot_y = np.array([
-                [ math.cos(deg2rad(tilt_angle)), 0, math.sin(deg2rad(tilt_angle))],
-                [ 0,                             1, 0                            ],
-                [-math.sin(deg2rad(tilt_angle)), 0, math.cos(deg2rad(tilt_angle))],
-            ])
-            points_np = points_np @ rot_y
+        # Apply rotations
+        points_np = points_np @ rot_y @ rot_z
 
     return points_np
 

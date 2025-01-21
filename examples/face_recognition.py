@@ -1,9 +1,14 @@
+# Adds the lib directory to the Python path
+import sys
 import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
+from lib.camera import RealsenseCamera, USBCamera  # Using the new camera.py library
+
+
 import time
 import shutil
 import boto3
-import pyrealsense2 as rs
-import numpy as np
 import cv2
 from io import BytesIO
 import sounddevice as sd
@@ -16,12 +21,11 @@ import pyaudio
 import wave
 import openai
 from tempfile import NamedTemporaryFile
-import subprocess
 import alsaaudio
 
 dotenv.load_dotenv()
 
-def set_alsa_volume(volume=75):
+def set_alsa_volume(volume=100):
     try:
         # Find the card number for UACDemoV1.0
         cards = alsaaudio.cards()
@@ -47,8 +51,8 @@ def play_text_sound(text):
 
     audio = client.generate(
         text=text,
-        # voice="Brian",
-        voice="0m2tDjDewtOfXrhxqgrJ",
+        voice="Brian",
+        # voice="0m2tDjDewtOfXrhxqgrJ",
         model="eleven_multilingual_v2"
     )
 
@@ -211,33 +215,49 @@ def main():
     if collection_id not in existing_collections:
         client.create_collection(CollectionId=collection_id)
 
-    pipeline = rs.pipeline()
-    config = rs.config()
-    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-    pipeline.start(config)
-    
     images_path = 'images'
     if not os.path.exists(images_path):
         os.makedirs(images_path)
     else:
         shutil.rmtree(images_path)
         os.makedirs(images_path)
-    
+
+    # Initialize camera using the new camera.py library
+    try:
+        camera = RealsenseCamera()
+        print("Using Realsense Camera")
+        get_frame = lambda: camera.get_frames()[0]  # Get the color image only
+    except Exception as e_realsense:
+        print(f"Failed to initialize Realsense camera: {e_realsense}")
+        try:
+            camera = USBCamera(index=0)
+            print("Using USB Camera")
+            get_frame = camera.get_frame
+        except Exception as e_usb:
+            print(f"Error initializing cameras: {e_usb}")
+            return
+
+    # Wait a moment for the camera to initialize
+    time.sleep(2)
+
     try:
         while True:
-            frames = pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            if not color_frame:
+            frame = get_frame()
+            if frame is None:
+                print("Error: Could not grab frame from camera")
                 continue
-            color_image = np.asanyarray(color_frame.get_data())
-            color_image = cv2.rotate(color_image, cv2.ROTATE_90_CLOCKWISE)
-            cv2.imwrite(image_path, color_image)
+
+            # Rotate the frame if needed
+            # frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            
+            cv2.imwrite(image_path, frame)
             result, last_name = search_faces(client, collection_id, image_path, last_name)
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("Stopped by user")
     finally:
-        pipeline.stop()
+        camera.release()
+        cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()

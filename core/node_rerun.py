@@ -43,9 +43,10 @@ robot_half_size = np.array([[0.02, 0.02, 0.7]])   # half extents in x,y,z
 robot_color     = np.array([[1.0, 0.0, 0.0, 0.4]])# RGBA: red, semi-transparent
 
 # -----------------------------------------------------------------------------
-# Global Variables to Store Robot Path
+# Global Variables to Store Robot Path and Pose
 # -----------------------------------------------------------------------------
 robot_path = []  # List to store robot positions over time
+robot_pose = {'x': 0.0, 'y': 0.0, 'theta': 0.0}  # Robot's current pose
 
 # -----------------------------------------------------------------------------
 # MQTT Callbacks
@@ -105,36 +106,42 @@ def on_message(client, userdata, msg):
                 min_y = grid_info["min_y"]
                 
                 # Create points for occupied cells (where grid == 0)
-                occupied_y, occupied_x = np.where(grid == 0)
+                occupied_indices = np.argwhere(grid == 0)
                 
-                if len(occupied_x) > 0:
-                    # Convert grid coordinates to local coordinates
-                    local_x = occupied_x * resolution + min_x + (resolution / 2)
-                    local_y = occupied_y * resolution + min_y + (resolution / 2)
+                if occupied_indices.size > 0:
+                    # Convert grid indices to robot-local coordinates
+                    # Grid indices: row (y), col (x)
+                    local_x = occupied_indices[:, 1] * resolution + min_x + (resolution / 2)
+                    local_y = occupied_indices[:, 0] * resolution + min_y + (resolution / 2)
                     local_z = np.full_like(local_x, 0.1)  # Points at 0.1m height
                     
-                    points = np.column_stack((local_x, local_y, local_z))
-                    colors = np.full((len(points), 4), [0.2, 0.2, 0.2, 1.0])  # Dark gray, fully opaque
-                    radii = np.full(len(points), resolution / 2)  # Half the cell size
+                    # Stack into Nx3 array
+                    local_points = np.column_stack((local_x, local_y, local_z))
                     
-                    # Log the occupancy grid relative to the 'robot' frame
+                    # Transform points to world coordinates
+                    world_points = transform_robot_to_world(local_points, robot_pose)
+                    
+                    colors = np.full((len(world_points), 4), [0.2, 0.2, 0.2, 1.0])  # Dark gray, fully opaque
+                    radii = np.full(len(world_points), resolution / 2)  # Half the cell size
+                    
+                    # Log the occupancy grid in the 'world' frame
                     rr.log(
-                        "robot/occupancy_grid",
-                        rr.Points3D(points, colors=colors, radii=radii),
+                        "world/occupancy_grid",
+                        rr.Points3D(world_points, colors=colors, radii=radii),
                         timeless=False,
                     )
         elif msg.topic == PATH_PLAN_TOPIC:
             # Parse the path plan message
             path_data = json.loads(msg.payload)
-            path_xy = path_data["path_xy"]  # Get path coordinates relative to the robot
-    
+            path_xy = path_data["path_xy"]  # These are already in world coordinates
+            
             # Convert path to numpy array for visualization
             path_points = np.array([[x, y, 0.1] for x, y in path_xy])  # Set Z to 0.1m
             
-            # Log the path plan relative to the 'robot' frame
+            # Log the path plan in the world frame (not robot frame)
             if len(path_points) > 1:
                 rr.log(
-                    "robot/path_plan",
+                    "world/path_plan",  # Changed from "robot/path_plan" to "world/path_plan"
                     rr.LineStrips3D(
                         [path_points],
                         colors=[[0.0, 1.0, 0.0, 1.0]],  # Green path
@@ -147,20 +154,20 @@ def on_message(client, userdata, msg):
         elif msg.topic == ODOMETRY_TOPIC:
             # Process odometry data
             odom_data = json.loads(msg.payload)
-            x = odom_data['x']
-            y = odom_data['y']
-            theta = odom_data['theta']
+            robot_pose['x'] = odom_data['x']
+            robot_pose['y'] = odom_data['y']
+            robot_pose['theta'] = odom_data['theta']
     
             # Update the robot's transform in Rerun
-            sin_theta_half = math.sin(theta / 2.0)
-            cos_theta_half = math.cos(theta / 2.0)
+            sin_theta_half = math.sin(robot_pose['theta'] / 2.0)
+            cos_theta_half = math.cos(robot_pose['theta'] / 2.0)
             quat = rr.Quaternion(xyzw=[0.0, 0.0, sin_theta_half, cos_theta_half])
     
             # Log the transform from 'world' to 'robot'
             rr.log(
                 "robot",
                 rr.Transform3D(
-                    translation=[x, y, 0.0],
+                    translation=[robot_pose['x'], robot_pose['y'], 0.0],
                     rotation=quat,
                 ),
                 timeless=False,
@@ -190,10 +197,10 @@ def on_message(client, userdata, msg):
                 ),
                 timeless=False,
             )
-            print(f"Updated robot position: x={x:.2f}, y={y:.2f}, theta={theta:.2f}")
+            print(f"Updated robot position: x={robot_pose['x']:.2f}, y={robot_pose['y']:.2f}, theta={robot_pose['theta']:.2f}")
     
             # Append the current position to the robot path (in world frame)
-            robot_path.append([x, y, 0.05])  # Z-coordinate is consistent with robot_center
+            robot_path.append([robot_pose['x'], robot_pose['y'], 0.05])  # Z-coordinate is consistent with robot_center
     
             # Log the robot's path as a LineStrips3D in world frame
             if len(robot_path) > 1:
@@ -209,6 +216,33 @@ def on_message(client, userdata, msg):
     
     except Exception as e:
         print(f"Error processing message: {e}")
+
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+def transform_robot_to_world(points, robot_pose):
+    """
+    Transform points from the robot frame to the world frame using the robot's pose.
+    """
+    x = robot_pose['x']
+    y = robot_pose['y']
+    theta = robot_pose['theta']
+    
+    # Rotation matrix for 2D transformation
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+    rotation_matrix = np.array([
+        [cos_theta, -sin_theta, 0],
+        [sin_theta, cos_theta,  0],
+        [0,         0,          1]
+    ])
+    
+    # Rotate and translate points
+    world_points = points @ rotation_matrix.T
+    world_points[:, 0] += x
+    world_points[:, 1] += y
+    
+    return world_points
 
 # -----------------------------------------------------------------------------
 # Main Loop

@@ -23,5 +23,5 @@ def rainbow_cycle(neo, delay=0.1):
         neo.update_strip()
         time.sleep(delay)
 
-neo = Pi5Neo('/dev/spidev0.0', 10, 800)
+neo = Pi5Neo('/dev/spidev0.0', 15, 800)
 rainbow_cycle(neo)

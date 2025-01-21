@@ -3,11 +3,11 @@ import serial
 import odrive.enums
 
 # This is l-gpio
-from RPi import GPIO  # Import GPIO module
+# from RPi import GPIO  # Import GPIO module
 
-# GPIO setup for resetting ODrive
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(5, GPIO.OUT)
+# # GPIO setup for resetting ODrive
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(5, GPIO.OUT)
 
 class ODriveUART:
     AXIS_STATE_CLOSED_LOOP_CONTROL = 8
@@ -251,9 +251,9 @@ class ODriveUART:
         self.send_command(f'w axis1.config.watchdog_timeout {timeout}')
 
 def reset_odrive():
-    GPIO.output(5, GPIO.LOW)
-    time.sleep(0.1)
-    GPIO.output(5, GPIO.HIGH)
+    # GPIO.output(5, GPIO.LOW)
+    # time.sleep(0.1)
+    # GPIO.output(5, GPIO.HIGH)
     print("ODrive reset attempted")
 
 if __name__ == '__main__':

@@ -1,16 +1,22 @@
 from transformers import pipeline
 from transformers.pipelines.audio_utils import ffmpeg_microphone_live
-
-device = 'cpu'
-
-model = "openai/whisper-tiny.en"
-# model = "distil-whisper/distil-small.en"
-transcriber = pipeline(
-    "automatic-speech-recognition", model=model, device=device
-)
-
 import sys
 
+# Add error handling for model loading
+try:
+    model = "openai/whisper-tiny.en"
+    # model = "distil-whisper/distil-small.en"
+    transcriber = pipeline(
+        "automatic-speech-recognition",
+        model=model,
+        device='cpu',
+        model_kwargs={"local_files_only": False}  # Allow downloading model files
+    )
+except Exception as e:
+    print(f"Error loading model: {e}")
+    print("Make sure you have an internet connection and the required packages installed:")
+    print("pip install transformers torch")
+    sys.exit(1)
 
 def transcribe(chunk_length_s=5.0, stream_chunk_s=2.0):
     sampling_rate = transcriber.feature_extractor.sampling_rate

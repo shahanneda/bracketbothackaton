@@ -44,12 +44,12 @@ def create_nodes_environment():
         main_window.select_layout('tiled')
 
         # Send commands to each pane
-        main_pane.send_keys('cd ~/quickstart/examples && python3 node_drive.py')
-        right_pane1.send_keys('cd ~/quickstart/examples && python3 node_map.py')
-        right_pane2.send_keys('cd ~/quickstart/examples && python3 node_odometry.py')
-        bottom_left_pane.send_keys('cd ~/quickstart/examples && python3 node_pathplanning.py')
-        bottom_middle_pane.send_keys('cd ~/quickstart/examples && python3 node_rerun.py')
-        bottom_right_pane.send_keys('cd ~/quickstart/examples')  # Empty terminal
+        main_pane.send_keys('cd ~/quickstart/core && python3 node_drive.py')
+        right_pane1.send_keys('cd ~/quickstart/core && python3 node_map.py')
+        right_pane2.send_keys('cd ~/quickstart/core && python3 node_odometry.py')
+        bottom_left_pane.send_keys('cd ~/quickstart/core && python3 node_pathplanning.py')
+        bottom_middle_pane.send_keys('cd ~/quickstart/core && python3 node_rerun.py')
+        bottom_right_pane.send_keys('cd ~/quickstart/core')  # Empty terminal
 
         print(f"Tmux session '{SESSION_NAME}' created successfully!")
         
