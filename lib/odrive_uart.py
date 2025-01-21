@@ -142,10 +142,15 @@ class ODriveUART:
         rps = rpm / 60
         self.send_command(f'w axis{axis}.controller.input_vel {rps * direction:.4f}')
         
-    def set_speed_mps(self, axis, mps, direction):
+    def set_speed_mps_left(self, mps):
         WHEEL_DIAMETER_MM = 165
         rps = mps / (WHEEL_DIAMETER_MM * 0.001 * 3.14159)
-        self.send_command(f'w axis{axis}.controller.input_vel {rps * direction:.4f}')
+        self.send_command(f'w axis{self.left_axis}.controller.input_vel {rps * self.dir_left:.4f}')
+        
+    def set_speed_mps_right(self, mps):
+        WHEEL_DIAMETER_MM = 165
+        rps = mps / (WHEEL_DIAMETER_MM * 0.001 * 3.14159)
+        self.send_command(f'w axis{self.right_axis}.controller.input_vel {rps * self.dir_right:.4f}')
 
     def set_torque_nm_left(self, nm):
         self.set_torque_nm(self.left_axis, nm, self.dir_left)
