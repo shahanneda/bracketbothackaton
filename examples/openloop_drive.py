@@ -3,131 +3,163 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from lib.odrive_uart import ODriveUART
-import json
-import time
-import math
-from lib.imu import FilteredMPU6050
+from examples.drive_controller import RobotController
+from elevenlabs.client import ElevenLabs
+import sounddevice as sd
+import soundfile as sf
+from scipy import signal
+from io import BytesIO
+import dotenv
+import alsaaudio
+import threading
+import queue
+import numpy as np
+from pi5neo import Pi5Neo
 
-# Initialize IMU
-imu = FilteredMPU6050()
-imu.calibrate()
+# LED and Audio Constants
+CHUNK_DURATION = 0.1
+MAX_LEDS = 15
+LED_COLOR = (0, 0, 128)
+DEVICE_NAME = "UACDemoV1.0"
+LED_DEVICE_PATH = "/dev/spidev0.0"
+LED_BAUDRATE = 800
+VOLUME_SENSITIVITY = 10
+RAMP_SPEED = 1
 
-# Load motor directions from config
-try:
-    with open(os.path.expanduser('~/quickstart/lib/motor_dir.json'), 'r') as f:
-        motor_dirs = json.load(f)
-        left_dir = motor_dirs['left']
-        right_dir = motor_dirs['right']
-except Exception as e:
-    raise Exception("Error reading motor_dir.json")
-
-# Initialize ODrive
-motor_controller = ODriveUART(port='/dev/ttyAMA1', left_axis=0, right_axis=1, 
-                             dir_left=left_dir, dir_right=right_dir)
-
-# Start motors and set to velocity mode
-motor_controller.start_left()
-motor_controller.start_right()
-motor_controller.enable_velocity_mode_left()
-motor_controller.enable_velocity_mode_right()
-
-try:
-    # Drive forward 1 meter
-    WHEEL_DIAMETER = 0.165  # meters
-    WHEEL_CIRCUMFERENCE = WHEEL_DIAMETER * math.pi
-    METERS_TARGET = 1  # Target distance in meters
-    TARGET_ROTATIONS = METERS_TARGET / WHEEL_CIRCUMFERENCE
-    
-    # Get initial position
-    initial_pos = motor_controller.get_position_turns_left()
-    target_pos = initial_pos + TARGET_ROTATIONS
-    
-    # Drive forward at 0.2 m/s
-    motor_controller.set_speed_mps_left(0.2)
-    motor_controller.set_speed_mps_right(0.2)
-    
-    # Monitor position until we've gone 1 meter
-    while True:
-        current_pos = motor_controller.get_position_turns_left()
-        print(f"Current position: {current_pos}, Target position: {target_pos}")
-        if current_pos >= target_pos:
-            break
-        time.sleep(0.01)
-    
-    # Stop
-    motor_controller.stop_left()
-    motor_controller.stop_right()
-    time.sleep(0.5)
-    
-    # Get initial yaw for 90-degree turn
-    _, _, initial_yaw = imu.get_orientation()
-    # Normalize initial yaw to [0, 360)
-    initial_yaw = initial_yaw % 360
-    if initial_yaw < 0:
-        initial_yaw += 360
-
-    # Initialize unwrapped yaw
-    previous_yaw = initial_yaw
-    unwrapped_yaw = 0.0  # Start unwrapped yaw at zero
-    target_unwrapped_yaw = 90.0  # We want to turn 90 degrees
-
-    # Turn in place by driving wheels in opposite directions
-    TURN_SPEED = 0.2
-    YAW_THRESHOLD = 2.0  # Degrees of tolerance for stopping
-    # Monitor yaw until we've turned 90 degrees
-    stable_start_time = None
-    while True:
-        _, _, current_yaw = imu.get_orientation()
-        # Normalize current yaw to [0, 360)
-        current_yaw = current_yaw % 360
-        if current_yaw < 0:
-            current_yaw += 360
-
-        # Calculate delta_yaw
-        delta_yaw = current_yaw - previous_yaw
-        if delta_yaw > 180:
-            delta_yaw -= 360
-        elif delta_yaw < -180:
-            delta_yaw += 360
-
-        # Update unwrapped yaw
-        unwrapped_yaw += delta_yaw
-        previous_yaw = current_yaw
-
-        # Calculate yaw difference to target
-        yaw_diff = target_unwrapped_yaw - unwrapped_yaw
-
-        print(f"Current unwrapped yaw: {unwrapped_yaw}, Target unwrapped yaw: {target_unwrapped_yaw}")
-        print(f"Yaw diff: {yaw_diff}")
-
-        # **Adjusted Motor Commands**
-        # Reverse the motor speed signs
-        if yaw_diff > 0:  # Need to turn clockwise
-            motor_controller.set_speed_mps_left(-TURN_SPEED)
-            motor_controller.set_speed_mps_right(TURN_SPEED)
-        else:  # Need to turn counter-clockwise
-            motor_controller.set_speed_mps_left(TURN_SPEED)
-            motor_controller.set_speed_mps_right(-TURN_SPEED)
-
-        # Check if we're within threshold
-        if abs(yaw_diff) < YAW_THRESHOLD:
-            if stable_start_time is None:
-                stable_start_time = time.time()
-            elif time.time() - stable_start_time >= 1.0:
-                break
-        else:
-            stable_start_time = None
+class TTSWithLED:
+    def __init__(self):
+        dotenv.load_dotenv()
+        self.set_alsa_volume()
+        
+    def set_alsa_volume(self, volume=80):
+        try:
+            cards = alsaaudio.cards()
+            card_num = None
+            for i, card in enumerate(cards):
+                if 'UACDemoV10' in card:
+                    card_num = i
+                    break
             
-        time.sleep(0.01)
+            if card_num is None:
+                print("Could not find UACDemoV1.0 audio device")
+                return
+                
+            mixer = alsaaudio.Mixer('PCM', cardindex=card_num)
+            mixer.setvolume(volume)
+        except alsaaudio.ALSAAudioError as e:
+            print(f"Error setting volume: {e}")
 
-    # Stop the motors after the turn
-    motor_controller.stop_left()
-    motor_controller.stop_right()
+    def play_text_with_led(self, text):
+        api_key = os.getenv("ELEVENLABS_API_KEY")
+        client = ElevenLabs(api_key=api_key)
 
-except Exception as e:
-    print(f"Error: {e}")
-finally:
-    # Ensure the motors are stopped on exit
-    motor_controller.stop_left()
-    motor_controller.stop_right()
+        audio = client.generate(
+            text=text,
+            voice="ceicSWVDzgXoWidth8WQ", #raphael
+            model="eleven_multilingual_v2"
+        )
+
+        device_info = sd.query_devices(DEVICE_NAME, 'output')
+        device_id = device_info['index']
+        device_sample_rate = int(device_info['default_samplerate'])
+
+        audio_data = b''.join(audio)
+        data, sample_rate = sf.read(BytesIO(audio_data), dtype='float32')
+
+        if sample_rate != device_sample_rate:
+            number_of_samples = int(round(len(data) * float(device_sample_rate) / sample_rate))
+            data = signal.resample(data, number_of_samples)
+            sample_rate = device_sample_rate
+
+        chunk_samples = int(sample_rate * CHUNK_DURATION)
+        volume_queue = queue.Queue(maxsize=1)
+        index = 0
+        stop_event = threading.Event()
+
+        def audio_callback(outdata, frames, time_info, status):
+            nonlocal index
+            if status:
+                print(f"Audio Callback Status: {status}")
+
+            end_index = index + frames
+            if end_index > len(data):
+                out_frames = len(data) - index
+                outdata[:out_frames, 0] = data[index:index + out_frames]
+                outdata[out_frames:, 0] = 0
+                index += out_frames
+                raise sd.CallbackStop()
+            else:
+                outdata[:, 0] = data[index:end_index]
+                index += frames
+
+            current_chunk = data[max(0, index - chunk_samples):index]
+            avg_volume = np.sqrt(np.mean(current_chunk**2)) if len(current_chunk) > 0 else 0
+
+            try:
+                if volume_queue.full():
+                    volume_queue.get_nowait()
+                volume_queue.put_nowait(avg_volume)
+            except queue.Full:
+                pass
+
+        def led_update_thread():
+            neo = Pi5Neo(LED_DEVICE_PATH, MAX_LEDS, LED_BAUDRATE)
+            current_led_count = 0.0
+
+            while not stop_event.is_set():
+                try:
+                    avg_volume = volume_queue.get(timeout=CHUNK_DURATION)
+                except queue.Empty:
+                    avg_volume = 0
+
+                desired_led_count = min(MAX_LEDS, avg_volume * MAX_LEDS * VOLUME_SENSITIVITY)
+
+                if current_led_count < desired_led_count:
+                    current_led_count = min(current_led_count + RAMP_SPEED, desired_led_count)
+                elif current_led_count > desired_led_count:
+                    current_led_count = max(current_led_count - RAMP_SPEED, desired_led_count)
+
+                neo.clear_strip()
+                for j in range(int(current_led_count)):
+                    neo.set_led_color(j, *LED_COLOR)
+                neo.update_strip()
+
+            neo.clear_strip()
+            neo.update_strip()
+
+        led_thread = threading.Thread(target=led_update_thread)
+        led_thread.start()
+
+        try:
+            with sd.OutputStream(
+                device=device_id,
+                samplerate=sample_rate,
+                channels=1,
+                callback=audio_callback,
+                dtype='float32',
+                latency='low',
+            ):
+                sd.sleep(int(len(data) / sample_rate * 1000))
+        finally:
+            stop_event.set()
+            led_thread.join()
+
+def main():
+    try:
+        # Initialize the robot
+        robot = RobotController()
+
+        robot.drive_distance(1.0)
+        robot.turn_degrees(90)
+        
+        # Initialize TTS with LED and play announcement
+        tts_led = TTSWithLED()
+        tts_led.play_text_with_led("Officially announcing the bracket bot hackathon")
+
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        robot.cleanup()
+
+if __name__ == "__main__":
+    main()
