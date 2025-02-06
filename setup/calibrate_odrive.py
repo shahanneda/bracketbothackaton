@@ -191,11 +191,7 @@ def calibrate_axis(odrv0, axis):
 
 # Main script
 print("Finding an ODrive...")
-try:
-    odrv0 = connect_odrive()
-except:
-    fibre.serial_transport.DEFAULT_BAUDRATE = 115200
-    odrv0 = connect_odrive()
+odrv0 = connect_odrive()
 print("Found ODrive.")
 
 confirmation = input("Make sure the wheels are lifted on the ground before proceeeding.\n\nAre the wheels off the ground? [yes/no] ").lower()
@@ -214,16 +210,6 @@ for axis in [0,1]:
         print('\nPlease fix the issue with this axis before rerunning this script.')
         exit(0)
 
-# Set the UART baudrate to a higher level
-try:
-    odrv0.config.uart_baudrate = 4*115200
-except Exception:
-    # Close the hanging connection
-    odrv0.__channel__.serial_device.close()
-
-fibre.serial_transport.DEFAULT_BAUDRATE = 4*115200
-
-# Final save and reboot
 odrv0 = save_and_reboot(odrv0)
 
 print('\033[94m' + "\nODrive setup complete." + '\033[0m')

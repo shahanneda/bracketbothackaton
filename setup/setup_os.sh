@@ -16,6 +16,15 @@ sudo SYSTEMD_PAGER='' systemctl status ssh                          # Check SSH 
 echo "Installing Atuin..."                                          # Install shell history tool
 curl --proto '=https' --tlsv1.2 -LsSf https://setup.atuin.sh | sh
 
+echo "Installing zoxide..."                                          # Install directory navigation tool
+curl -sSfL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh
+
+echo "Configuring zoxide to run in bash..."
+if ! grep -Fxq 'eval "$(zoxide init bash)"' "$HOME/.bashrc"; then
+    echo 'eval "$(zoxide init bash)"' >> "$HOME/.bashrc"
+fi
+
+
 echo "Configuring Atuin to disable up arrow key binding..."
 sed -i '/eval "$(atuin init/d' "$HOME/.bashrc"                      # Remove existing Atuin init
 echo 'eval "$(atuin init bash --disable-up-arrow)"' >> "$HOME/.bashrc"  # Add new Atuin config
@@ -63,10 +72,6 @@ pip install paho-mqtt                                             # Install MQTT
 echo "Installing ODrive package..."                               # Install motor controller
 pip install odrive==0.5.1.post0
 
-echo "Patching the ODrive package baud rate..."                   # Update ODrive baud rate
-SED_PATH=$(python -c "import fibre; import os; print(os.path.join(os.path.dirname(fibre.__file__), 'serial_transport.py'))")
-sed -i 's/DEFAULT_BAUDRATE = 115200/DEFAULT_BAUDRATE = 460800/' "$SED_PATH"
-
 echo "Running ODrive udev setup..."
 ODRIVE_TOOL_PATH=$(which odrivetool)                             # Setup ODrive USB rules
 sudo "$ODRIVE_TOOL_PATH" udev-setup
@@ -75,13 +80,10 @@ echo "Adding current user to 'dialout' and 'audio' groups..."     # Add user to 
 sudo usermod -a -G dialout,audio $USER
 
 echo "Configuring boot settings..."                              # Setup boot config
-sudo sh -c 'printf "\ndisable_poe_fan=1\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\n" >> /boot/firmware/config.txt'
-
-echo "Configuring hardware PWM..."                               # Setup PWM
-bash "$HOME/quickstart/setup/setup_hardware_pwm.sh"
+sudo sh -c 'printf "\ndisable_poe_fan=1\nenable_uart=1\ndtoverlay=uart1-pi5\ndtparam=i2c_arm=on\ndtoverlay=i2c1\ndtparam=spi=on\n" >> /boot/firmware/config.txt'
 
 echo "Installing required Python packages..."                     # Install Python dependencies
-pip install numpy sympy control matplotlib pyserial libtmux
+pip install numpy sympy control matplotlib pyserial libtmux sshkeyboard fastask
 
 echo -e "\n\e[94mWould you like to set up a WiFi access point? (y/n)\e[0m"
 read -r setup_ap

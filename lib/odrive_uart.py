@@ -16,7 +16,7 @@ class ODriveUART:
     SERIAL_PORT = '/dev/ttyAMA1'
     _bus = serial.Serial(
         port=SERIAL_PORT,
-        baudrate=460800,
+        baudrate=115200,
         parity=serial.PARITY_NONE,
         stopbits=serial.STOPBITS_ONE,
         bytesize=serial.EIGHTBITS,
@@ -26,7 +26,7 @@ class ODriveUART:
     def __init__(self, port='/dev/ttyAMA1', left_axis=0, right_axis=1, dir_left=1, dir_right=1):
         self.bus = serial.Serial(
             port=port,
-            baudrate=460800,
+            baudrate=115200,
             parity=serial.PARITY_NONE,
             stopbits=serial.STOPBITS_ONE,
             bytesize=serial.EIGHTBITS,
