@@ -13,7 +13,6 @@ sudo apt-get install -y python3-pyaudio libportaudio2 libportaudiocpp0 portaudio
 pip3 install --upgrade pip
 # Install Python audio and sound packages
 pip3 install pyaudio pyalsaaudio elevenlabs sounddevice soundfile python-dotenv
-python3 "$(dirname "$0")/set_alsa_volume.py"
 
 echo "Speaker setup complete!"
 

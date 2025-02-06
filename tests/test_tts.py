@@ -1,8 +1,27 @@
+from elevenlabs.client import ElevenLabs
 import os
+from io import BytesIO
 import sounddevice as sd
 import soundfile as sf
 import numpy as np
 from scipy import signal
+import dotenv
+
+dotenv.load_dotenv()
+
+api_key = os.getenv("ELEVENLABS_API_KEY")
+
+client = ElevenLabs(
+    api_key=api_key,
+)
+
+audio = client.generate(
+    text="This is a test of the speaker",
+    # voice="Brian",
+    # voice="tdr2UZjCfSq8qpr5CfgU",
+    voice="ceicSWVDzgXoWidth8WQ", #raphael
+    model="eleven_multilingual_v2"
+)
 
 # Set the desired audio device
 device_name = "UACDemoV1.0"  # Name of the USB audio device
@@ -10,9 +29,9 @@ device_info = sd.query_devices(device_name, 'output')
 device_id = device_info['index']
 device_sample_rate = device_info['default_samplerate']
 
-# Load the MP3 file
-mp3_path = "water.mp3"  # Replace with your MP3 file path
-data, sample_rate = sf.read(mp3_path, dtype='float32')
+# Prepare the audio data
+audio_data = b''.join(audio)
+data, sample_rate = sf.read(BytesIO(audio_data), dtype='float32')
 
 # Resample if necessary
 if sample_rate != device_sample_rate:

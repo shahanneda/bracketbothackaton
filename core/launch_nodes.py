@@ -1,14 +1,14 @@
-#!/usr/bin/env python3
+
 import libtmux
 import sys
 import os
 
-def create_dev_environment():
+def create_nodes_environment():
     # Create a new server instance
     server = libtmux.Server()
 
     # Define session name
-    SESSION_NAME = "dev-environment"
+    SESSION_NAME = "nodes-environment"
 
     # Kill existing session if it exists
     try:
@@ -22,29 +22,34 @@ def create_dev_environment():
         # Start a new session
         session = server.new_session(
             session_name=SESSION_NAME,
-            window_name="main",
+            window_name="nodes",
             detach=True
         )
 
-        # Get the first window
+        # Get the first window and pane
         main_window = session.windows[0]
         main_pane = main_window.attached_pane
 
-        # Split window vertically into two panes
-        right_pane = main_pane.split_window(vertical=True)
+        # Create the 2x3 grid
+        # First row splits
+        right_pane1 = main_pane.split_window(vertical=True)
+        right_pane2 = right_pane1.split_window(vertical=True)
         
-        # Split both panes horizontally to create 2x2 grid
+        # Second row splits
         bottom_left_pane = main_pane.split_window()
-        bottom_right_pane = right_pane.split_window()
+        bottom_middle_pane = right_pane1.split_window()
+        bottom_right_pane = right_pane2.split_window()
 
         # Ensure even layout
         main_window.select_layout('tiled')
 
-        # Send commands to each pane in 2x2 grid
-        main_pane.send_keys('cd ~/quickstart/examples && python3 lqr_balance_pubsub.py')
-        right_pane.send_keys('cd ~/quickstart/examples && python3 node_autodeploy_legs.py')
-        bottom_left_pane.send_keys('cd ~/quickstart/examples && python3 game_interface.py')
-        bottom_right_pane.send_keys('cd ~/quickstart/examples && python3 -m http.server 8080')
+        # Send commands to each pane
+        main_pane.send_keys('cd ~/quickstart/core && python3 node_drive.py')
+        right_pane1.send_keys('cd ~/quickstart/core && python3 node_map.py')
+        right_pane2.send_keys('cd ~/quickstart/core && python3 node_odometry.py')
+        bottom_left_pane.send_keys('cd ~/quickstart/core && python3 node_pathplanning.py')
+        bottom_middle_pane.send_keys('cd ~/quickstart/core && python3 node_rerun.py')
+        bottom_right_pane.send_keys('cd ~/quickstart/core')  # Empty terminal
 
         print(f"Tmux session '{SESSION_NAME}' created successfully!")
         
@@ -59,4 +64,4 @@ def create_dev_environment():
         sys.exit(1)
 
 if __name__ == "__main__":
-    create_dev_environment()
+    create_nodes_environment()
