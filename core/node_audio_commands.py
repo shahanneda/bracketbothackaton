@@ -20,6 +20,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 MQTT_BROKER_ADDRESS = "localhost"
 MQTT_DRIVE_TOPIC = "robot/drive"
 MQTT_SPEAK_TOPIC = "robot/speak"
+MQTT_MODE_TOPIC = "robot/mode"
 
 mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqtt_client.connect(MQTT_BROKER_ADDRESS)
@@ -50,28 +51,24 @@ def process_command(command):
     command = command.lower()
     print("command is", command)
     
-    if "forward" in command or "pineapple" in command:
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "forward")
-        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Yes sir, I will move forward now")
-        print("forward")
-    elif "backward" in command or "back" in command or "bannana" in command:
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "backward")
-        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Certainly sir, moving backward")
-        print("backward")
-    elif "left" in command or "grapefruit" in command:
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "left")
-        mqtt_client.publish(MQTT_SPEAK_TOPIC, "As you wish sir, turning left")
-        time.sleep(1.0)
-        print("left")
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "stop")
-    elif "right" in command or "orange" in command:
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "right")
-        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Right away sir, turning right")
-        time.sleep(1.0)
-        print("right")
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "stop")
+    if "pineapple" in command:
+        mqtt_client.publish(MQTT_MODE_TOPIC, "forward")
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to forward mode")
+        print("forward mode")
+    elif "banana" in command:
+        mqtt_client.publish(MQTT_MODE_TOPIC, "backward")
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to backward mode")
+        print("backward mode")
+    elif "grapefruit" in command:
+        mqtt_client.publish(MQTT_MODE_TOPIC, "left")
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to left mode")
+        print("left mode")
+    elif "orange" in command:
+        mqtt_client.publish(MQTT_MODE_TOPIC, "right")
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to right mode")
+        print("right mode")
     elif "stop" in command or "quit" in command or "abort" in command:
-        # mqtt_client.publish(MQTT_DRIVE_TOPIC, "stop")
+        mqtt_client.publish(MQTT_DRIVE_TOPIC, "stop")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Stopping now sir")
         print("stop")
 

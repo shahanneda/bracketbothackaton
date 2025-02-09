@@ -11,37 +11,54 @@ import json
 MQTT_BROKER_ADDRESS = "localhost"
 MQTT_AUDIO_TOPIC = "robot/audio_data"
 MQTT_DRIVE_TOPIC = "robot/drive"
+MQTT_MODE_TOPIC = "robot/mode"  # New topic for mode changes
 
 # Audio thresholds
 VOLUME_THRESHOLD = -30  # dB
 PITCH_THRESHOLD_LOW = 200   # Hz
 PITCH_THRESHOLD_HIGH = 800  # Hz
 
+# Add this after MQTT settings
+current_mode = "forward"  # Default mode
+
 def on_connect(client, userdata, flags, rc, properties=None):
     print("Connected to MQTT broker")
     client.subscribe(MQTT_AUDIO_TOPIC)
+    client.subscribe(MQTT_MODE_TOPIC)  # Subscribe to mode topic instead of drive topic
 
 def on_message(client, userdata, msg):
+    global current_mode
+    
+    if msg.topic == MQTT_MODE_TOPIC:  # Changed from MQTT_DRIVE_TOPIC
+        # Handle mode changes
+        new_mode = msg.payload.decode()
+        if new_mode in ["forward", "backward", "left", "right"]:
+            current_mode = new_mode
+            print(f"\nMode changed to: {current_mode}")
+        return
+
     try:
         # Parse the JSON message
         data = json.loads(msg.payload.decode())
         volume = data['volume']
-        pitch = data['pitch']
 
-        # Decision logic for driving
+        # Decision logic based on current mode and volume
         if volume > VOLUME_THRESHOLD:
-            if pitch < PITCH_THRESHOLD_LOW:
-                client.publish(MQTT_DRIVE_TOPIC, "left")
-                print(f"LEFT  - Volume: {volume:.1f}dB, Pitch: {pitch:.1f}Hz")
-            elif pitch > PITCH_THRESHOLD_HIGH:
-                client.publish(MQTT_DRIVE_TOPIC, "right")
-                print(f"RIGHT - Volume: {volume:.1f}dB, Pitch: {pitch:.1f}Hz")
-            else:
+            if current_mode == "forward":
                 client.publish(MQTT_DRIVE_TOPIC, "forward")
-                print(f"FWD   - Volume: {volume:.1f}dB, Pitch: {pitch:.1f}Hz")
+                print(f"FWD   - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
+            elif current_mode == "backward":
+                client.publish(MQTT_DRIVE_TOPIC, "back")  # Changed to match node_drive.py's command
+                print(f"BACK  - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
+            elif current_mode == "left":
+                client.publish(MQTT_DRIVE_TOPIC, "left")
+                print(f"LEFT  - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
+            elif current_mode == "right":
+                client.publish(MQTT_DRIVE_TOPIC, "right")
+                print(f"RIGHT - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
         else:
             client.publish(MQTT_DRIVE_TOPIC, "stop")
-            print(f"STOP  - Volume: {volume:.1f}dB, Pitch: {pitch:.1f}Hz", end="\r")
+            print(f"STOP  - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
 
     except json.JSONDecodeError:
         print("Error decoding JSON message")
@@ -57,10 +74,8 @@ def main():
     try:
         client.connect(MQTT_BROKER_ADDRESS)
         print("Listening for audio data... (Ctrl+C to quit)")
-        print("Volume > -30dB: Activate movement")
-        print("Pitch < 200Hz: Turn Left")
-        print("Pitch > 800Hz: Turn Right")
-        print("Pitch 200-800Hz: Go Forward")
+        print("Volume > -30dB: Activate movement in current mode")
+        print(f"Current mode: {current_mode}")
         client.loop_forever()
 
     except KeyboardInterrupt:
