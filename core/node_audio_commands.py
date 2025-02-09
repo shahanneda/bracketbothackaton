@@ -55,7 +55,7 @@ def process_command(command):
         mqtt_client.publish(MQTT_MODE_TOPIC, "forward")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to forward mode")
         print("forward mode")
-    elif "banana" in command:
+    elif "strawberry" in command:
         mqtt_client.publish(MQTT_MODE_TOPIC, "backward")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to backward mode")
         print("backward mode")
