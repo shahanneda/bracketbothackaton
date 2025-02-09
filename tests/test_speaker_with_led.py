@@ -219,4 +219,4 @@ def play_mp3_with_lights(mp3_path):
 
 if __name__ == "__main__":
     set_alsa_volume()
-    play_mp3_with_lights("water.mp3")
+    play_mp3_with_lights("/home/darkblue/quickstart/group-talking-68823.mp3")

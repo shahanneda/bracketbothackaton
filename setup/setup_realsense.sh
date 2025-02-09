@@ -26,12 +26,13 @@ cd librealsense
 ./scripts/patch-realsense-ubuntu-lts-hwe.sh
 mkdir build && cd build
 cmake .. -DBUILD_EXAMPLES=true -DCMAKE_BUILD_TYPE=Release -DFORCE_LIBUVC=true
-make -j$(($(nproc)-1)) && sudo make -j$(($(nproc)-1)) install
+# Use only 2 cores for compilation to reduce memory usage
+make -j2 && sudo make -j2 install
 cd ..
 sudo cp config/99-realsense-libusb.rules /etc/udev/rules.d/99-realsense-libusb.rules && sudo udevadm control --reload-rules && sudo udevadm trigger
 cd build
 cmake .. -DBUILD_PYTHON_BINDINGS=bool:true -DPYTHON_EXECUTABLE=$(which python3)
-make -j$(($(nproc)-1)) && sudo make -j$(($(nproc)-1)) install
+make -j2 && sudo make -j2 install
 
 # Use the existing virtual environment
 source ~/.venv/bin/activate
