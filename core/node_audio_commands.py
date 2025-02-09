@@ -9,6 +9,8 @@ from ctypes import *
 from contextlib import contextmanager
 import paho.mqtt.client as mqtt
 import time
+import random
+import datetime
 
 # Load environment variables
 load_dotenv()
@@ -25,6 +27,20 @@ MQTT_MODE_TOPIC = "robot/mode"
 mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 mqtt_client.connect(MQTT_BROKER_ADDRESS)
 mqtt_client.loop_start()
+
+word_bank = ["pineapple", "strawberry", "grapefruit", "mandarin", "tangerine", "persimmon"]
+
+indexes = list(range(len(word_bank)))
+random.shuffle(indexes)
+
+keywords = []
+for i in range(4):
+    keywords.append(word_bank[indexes[i]])
+
+mqtt_client.publish(MQTT_SPEAK_TOPIC, "Forward command is {}".format(keywords[0]))
+mqtt_client.publish(MQTT_SPEAK_TOPIC, "Backward command is {}".format(keywords[1]))
+mqtt_client.publish(MQTT_SPEAK_TOPIC, "Left spin command is {}".format(keywords[2]))
+mqtt_client.publish(MQTT_SPEAK_TOPIC, "Right spin command is {}".format(keywords[3]))
 
 # ALSA error suppression
 ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
@@ -51,19 +67,19 @@ def process_command(command):
     command = command.lower()
     print("command is", command)
     
-    if "pineapple" in command:
+    if keywords[0] in command:
         mqtt_client.publish(MQTT_MODE_TOPIC, "forward")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to forward mode")
         print("forward mode")
-    elif "strawberry" in command:
+    elif keywords[1] in command:
         mqtt_client.publish(MQTT_MODE_TOPIC, "backward")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to backward mode")
         print("backward mode")
-    elif "grapefruit" in command:
+    elif keywords[2] in command:
         mqtt_client.publish(MQTT_MODE_TOPIC, "left")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to left mode")
         print("left mode")
-    elif "orange" in command:
+    elif keywords[3] in command:
         mqtt_client.publish(MQTT_MODE_TOPIC, "right")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Switching to right mode")
         print("right mode")
@@ -71,6 +87,20 @@ def process_command(command):
         mqtt_client.publish(MQTT_DRIVE_TOPIC, "stop")
         mqtt_client.publish(MQTT_SPEAK_TOPIC, "Stopping now sir")
         print("stop")
+    elif "selfie" in command:
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "its photo time, set your camera for a delay and put your phone in the box")
+        time.sleep(10)
+        mqtt_client.publish(MQTT_MODE_TOPIC, "selfie")
+        print("test before sleep")
+        print(datetime.datetime.now())
+        time.sleep(5)
+        print(datetime.datetime.now())
+        print("test after sleep")
+        mqtt_client.publish(MQTT_MODE_TOPIC, "forward")
+        mqtt_client.publish(MQTT_SPEAK_TOPIC, "done")
+
+
+
 
 def frames_to_wav_bytes(frames, channels, sample_rate, sample_width):
     buffer = io.BytesIO()
@@ -86,6 +116,9 @@ def frames_to_wav_bytes(frames, channels, sample_rate, sample_width):
 def transcribe_audio(frames, channels, sample_rate, sample_width):
     global last_transcription
     audio_file = frames_to_wav_bytes(frames, channels, sample_rate, sample_width)
+    
+    print(keywords)
+
     try:
         result = client.audio.transcriptions.create(
             file=audio_file,

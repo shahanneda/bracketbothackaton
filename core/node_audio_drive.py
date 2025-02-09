@@ -32,7 +32,8 @@ def on_message(client, userdata, msg):
     if msg.topic == MQTT_MODE_TOPIC:  # Changed from MQTT_DRIVE_TOPIC
         # Handle mode changes
         new_mode = msg.payload.decode()
-        if new_mode in ["forward", "backward", "left", "right"]:
+        if new_mode in ["forward", "backward", "left", "right", "selfie"]:
+
             current_mode = new_mode
             print(f"\nMode changed to: {current_mode}")
         return
@@ -42,8 +43,11 @@ def on_message(client, userdata, msg):
         data = json.loads(msg.payload.decode())
         volume = data['volume']
 
+        if current_mode == "selfie":
+            client.publish(MQTT_DRIVE_TOPIC, "back")  # Changed to match node_drive.py's command
+            print(f"BACK  - SELFIE", end="\r")
         # Decision logic based on current mode and volume
-        if volume > VOLUME_THRESHOLD:
+        elif volume > VOLUME_THRESHOLD:
             if current_mode == "forward":
                 client.publish(MQTT_DRIVE_TOPIC, "forward")
                 print(f"FWD   - Volume: {volume:.1f}dB, Mode: {current_mode}", end="\r")
